@@ -1,6 +1,6 @@
 [project]
 
-name = "nodriver" # Required
+name = "nodriver-reforged" # Required
 
 version = "0.48.1"  # Required
 
@@ -72,9 +72,10 @@ dependencies = [
 
 #
 [project.urls]
-"Homepage" = "https://github.com/UltrafunkAmsterdam/nodriver"
-"Bug Reports" = "https://github.com/UltrafunkAmsterdam/nodriver/issues"
-"Source" = "https://github.com/UltrafunkAmsterdam/nodriver"
+"Homepage" = "https://github.com/codeisalifestyle/nodriver-reforged"
+"Bug Reports" = "https://github.com/codeisalifestyle/nodriver-reforged/issues"
+"Source" = "https://github.com/codeisalifestyle/nodriver-reforged"
+"Upstream" = "https://github.com/UltrafunkAmsterdam/nodriver"
 
 
 [tool.setuptools]
