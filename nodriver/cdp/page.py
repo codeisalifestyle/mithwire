@@ -88,66 +88,6 @@ class AdFrameStatus:
         )
 
 
-@dataclass
-class AdScriptId:
-    '''
-    Identifies the script which caused a script or frame to be labelled as an
-    ad.
-    '''
-    #: Script Id of the script which caused a script or frame to be labelled as
-    #: an ad.
-    script_id: runtime.ScriptId
-
-    #: Id of scriptId's debugger.
-    debugger_id: runtime.UniqueDebuggerId
-
-    def to_json(self) -> T_JSON_DICT:
-        json: T_JSON_DICT = dict()
-        json['scriptId'] = self.script_id.to_json()
-        json['debuggerId'] = self.debugger_id.to_json()
-        return json
-
-    @classmethod
-    def from_json(cls, json: T_JSON_DICT) -> AdScriptId:
-        return cls(
-            script_id=runtime.ScriptId.from_json(json['scriptId']),
-            debugger_id=runtime.UniqueDebuggerId.from_json(json['debuggerId']),
-        )
-
-
-@dataclass
-class AdScriptAncestry:
-    '''
-    Encapsulates the script ancestry and the root script filterlist rule that
-    caused the frame to be labelled as an ad. Only created when ``ancestryChain``
-    is not empty.
-    '''
-    #: A chain of ``AdScriptId``'s representing the ancestry of an ad script that
-    #: led to the creation of a frame. The chain is ordered from the script
-    #: itself (lower level) up to its root ancestor that was flagged by
-    #: filterlist.
-    ancestry_chain: typing.List[AdScriptId]
-
-    #: The filterlist rule that caused the root (last) script in
-    #: ``ancestryChain`` to be ad-tagged. Only populated if the rule is
-    #: available.
-    root_script_filterlist_rule: typing.Optional[str] = None
-
-    def to_json(self) -> T_JSON_DICT:
-        json: T_JSON_DICT = dict()
-        json['ancestryChain'] = [i.to_json() for i in self.ancestry_chain]
-        if self.root_script_filterlist_rule is not None:
-            json['rootScriptFilterlistRule'] = self.root_script_filterlist_rule
-        return json
-
-    @classmethod
-    def from_json(cls, json: T_JSON_DICT) -> AdScriptAncestry:
-        return cls(
-            ancestry_chain=[AdScriptId.from_json(i) for i in json['ancestryChain']],
-            root_script_filterlist_rule=str(json['rootScriptFilterlistRule']) if json.get('rootScriptFilterlistRule', None) is not None else None,
-        )
-
-
 class SecureContextType(enum.Enum):
     '''
     Indicates whether the frame is a secure context and why it is the case.
@@ -206,6 +146,7 @@ class PermissionsPolicyFeature(enum.Enum):
     AMBIENT_LIGHT_SENSOR = "ambient-light-sensor"
     ARIA_NOTIFY = "aria-notify"
     ATTRIBUTION_REPORTING = "attribution-reporting"
+    AUTOFILL = "autofill"
     AUTOPLAY = "autoplay"
     BLUETOOTH = "bluetooth"
     BROWSING_TOPICS = "browsing-topics"
@@ -253,7 +194,6 @@ class PermissionsPolicyFeature(enum.Enum):
     ENCRYPTED_MEDIA = "encrypted-media"
     EXECUTION_WHILE_OUT_OF_VIEWPORT = "execution-while-out-of-viewport"
     EXECUTION_WHILE_NOT_RENDERED = "execution-while-not-rendered"
-    FENCED_UNPARTITIONED_STORAGE_READ = "fenced-unpartitioned-storage-read"
     FOCUS_WITHOUT_USER_ACTIVATION = "focus-without-user-activation"
     FULLSCREEN = "fullscreen"
     FROBULATE = "frobulate"
@@ -269,8 +209,11 @@ class PermissionsPolicyFeature(enum.Enum):
     LANGUAGE_DETECTOR = "language-detector"
     LANGUAGE_MODEL = "language-model"
     LOCAL_FONTS = "local-fonts"
+    LOCAL_NETWORK = "local-network"
     LOCAL_NETWORK_ACCESS = "local-network-access"
+    LOOPBACK_NETWORK = "loopback-network"
     MAGNETOMETER = "magnetometer"
+    MANUAL_TEXT = "manual-text"
     MEDIA_PLAYBACK_WHILE_NOT_VISIBLE = "media-playback-while-not-visible"
     MICROPHONE = "microphone"
     MIDI = "midi"
@@ -278,7 +221,6 @@ class PermissionsPolicyFeature(enum.Enum):
     OTP_CREDENTIALS = "otp-credentials"
     PAYMENT = "payment"
     PICTURE_IN_PICTURE = "picture-in-picture"
-    POPINS = "popins"
     PRIVATE_AGGREGATION = "private-aggregation"
     PRIVATE_STATE_TOKEN_ISSUANCE = "private-state-token-issuance"
     PRIVATE_STATE_TOKEN_REDEMPTION = "private-state-token-redemption"
@@ -289,7 +231,6 @@ class PermissionsPolicyFeature(enum.Enum):
     RUN_AD_AUCTION = "run-ad-auction"
     SCREEN_WAKE_LOCK = "screen-wake-lock"
     SERIAL = "serial"
-    SHARED_AUTOFILL = "shared-autofill"
     SHARED_STORAGE = "shared-storage"
     SHARED_STORAGE_SELECT_URL = "shared-storage-select-url"
     SMART_CARD = "smart-card"
@@ -298,6 +239,7 @@ class PermissionsPolicyFeature(enum.Enum):
     SUB_APPS = "sub-apps"
     SUMMARIZER = "summarizer"
     SYNC_XHR = "sync-xhr"
+    TOOLS = "tools"
     TRANSLATOR = "translator"
     UNLOAD = "unload"
     USB = "usb"
@@ -1782,6 +1724,7 @@ class BackForwardCacheNotRestoredReason(enum.Enum):
     BACK_FORWARD_CACHE_DISABLED_FOR_PRERENDER = "BackForwardCacheDisabledForPrerender"
     USER_AGENT_OVERRIDE_DIFFERS = "UserAgentOverrideDiffers"
     FOREGROUND_CACHE_LIMIT = "ForegroundCacheLimit"
+    FORWARD_CACHE_DISABLED = "ForwardCacheDisabled"
     BROWSING_INSTANCE_NOT_SWAPPED = "BrowsingInstanceNotSwapped"
     BACK_FORWARD_CACHE_DISABLED_FOR_DELEGATE = "BackForwardCacheDisabledForDelegate"
     UNLOAD_HANDLER_EXISTS_IN_MAIN_FRAME = "UnloadHandlerExistsInMainFrame"
@@ -1825,6 +1768,7 @@ class BackForwardCacheNotRestoredReason(enum.Enum):
     SHARED_WORKER_MESSAGE = "SharedWorkerMessage"
     SHARED_WORKER_WITH_NO_ACTIVE_CLIENT = "SharedWorkerWithNoActiveClient"
     WEB_LOCKS = "WebLocks"
+    WEB_LOCKS_CONTENTION = "WebLocksContention"
     WEB_HID = "WebHID"
     WEB_BLUETOOTH = "WebBluetooth"
     WEB_SHARE = "WebShare"
@@ -1882,6 +1826,7 @@ class BackForwardCacheNotRestoredReason(enum.Enum):
     EMBEDDER_EXTENSION_MESSAGING = "EmbedderExtensionMessaging"
     EMBEDDER_EXTENSION_MESSAGING_FOR_OPEN_PORT = "EmbedderExtensionMessagingForOpenPort"
     EMBEDDER_EXTENSION_SENT_MESSAGE_TO_CACHED_FRAME = "EmbedderExtensionSentMessageToCachedFrame"
+    EMBEDDER_EXTENSION_FRAME = "EmbedderExtensionFrame"
     REQUESTED_BY_WEB_VIEW_CLIENT = "RequestedByWebViewClient"
     POST_MESSAGE_BY_WEB_VIEW_CLIENT = "PostMessageByWebViewClient"
     CACHE_CONTROL_NO_STORE_DEVICE_BOUND_SESSION_TERMINATED = "CacheControlNoStoreDeviceBoundSessionTerminated"
@@ -2352,7 +2297,7 @@ def get_app_id() -> typing.Generator[T_JSON_DICT,T_JSON_DICT,typing.Tuple[typing
 
 def get_ad_script_ancestry(
         frame_id: FrameId
-    ) -> typing.Generator[T_JSON_DICT,T_JSON_DICT,typing.Optional[AdScriptAncestry]]:
+    ) -> typing.Generator[T_JSON_DICT,T_JSON_DICT,typing.Optional[network.AdAncestry]]:
     '''
 
 
@@ -2368,7 +2313,7 @@ def get_ad_script_ancestry(
         'params': params,
     }
     json = yield cmd_dict
-    return AdScriptAncestry.from_json(json['adScriptAncestry']) if json.get('adScriptAncestry', None) is not None else None
+    return network.AdAncestry.from_json(json['adScriptAncestry']) if json.get('adScriptAncestry', None) is not None else None
 
 
 def get_frame_tree() -> typing.Generator[T_JSON_DICT,T_JSON_DICT,FrameTree]:
@@ -3390,6 +3335,29 @@ def set_prerendering_allowed(
         'params': params,
     }
     json = yield cmd_dict
+
+
+def get_annotated_page_content(
+        include_actionable_information: typing.Optional[bool] = None
+    ) -> typing.Generator[T_JSON_DICT,T_JSON_DICT,str]:
+    '''
+    Get the annotated page content for the main frame.
+    This is an experimental command that is subject to change.
+
+    **EXPERIMENTAL**
+
+    :param include_actionable_information: *(Optional)* Whether to include actionable information. Defaults to true.
+    :returns: The annotated page content as a base64 encoded protobuf. The format is defined by the ``AnnotatedPageContent`` message in components/optimization_guide/proto/features/common_quality_data.proto (Encoded as a base64 string when passed over JSON)
+    '''
+    params: T_JSON_DICT = dict()
+    if include_actionable_information is not None:
+        params['includeActionableInformation'] = include_actionable_information
+    cmd_dict: T_JSON_DICT = {
+        'method': 'Page.getAnnotatedPageContent',
+        'params': params,
+    }
+    json = yield cmd_dict
+    return str(json['content'])
 
 
 @event_class('Page.domContentEventFired')

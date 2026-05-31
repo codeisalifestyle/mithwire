@@ -936,63 +936,67 @@ class Element:
         except (Exception,):
             logger.debug("flash() : could not determine position")
             return
-
-        style = (
-            "position:absolute;z-index:99999999;padding:0;margin:0;"
-            "left:{:.1f}px; top: {:.1f}px;"
-            "opacity:1;"
-            "width:16px;height:16px;border-radius:50%;background:red;"
-            "animation:show-pointer-ani {:.2f}s ease 1;"
-        ).format(
-            pos.center[0] - 8,  # -8 to account for drawn circle itself (w,h)
-            pos.center[1] - 8,
-            duration,
-        )
-        script = (
-            """
-            (targetElement) => {{
-                var css = document.styleSheets[0];
-                for( let css of [...document.styleSheets]) {{
-                    try {{
-                        css.insertRule(`
-                        @keyframes show-pointer-ani {{
-                              0% {{ opacity: 1; transform: scale(2, 2);}}
-                              25% {{ transform: scale(5,5) }}
-                              50% {{ transform: scale(3, 3);}}
-                              75%: {{ transform: scale(2,2) }}
-                              100% {{ transform: scale(1, 1); opacity: 0;}}
-                        }}`,css.cssRules.length);
-                        break;
-                    }} catch (e) {{
-                        console.log(e)
-                    }}
-                }};
-                var _d = document.createElement('div');
-                _d.style = `{0:s}`;
-                _d.id = `{1:s}`;
-                document.body.insertAdjacentElement('afterBegin', _d);
-                                
-                setTimeout( () => document.getElementById('{1:s}').remove(), {2:d});
-            }}
-            """.format(
-                style,
-                secrets.token_hex(8),
-                int(duration * 1000),
-            )
-            .replace("  ", "")
-            .replace("\n", "")
-        )
-
-        arguments = [cdp.runtime.CallArgument(object_id=self._remote_object.object_id)]
-        await self._tab.send(
-            cdp.runtime.call_function_on(
-                script,
-                object_id=self._remote_object.object_id,
-                arguments=arguments,
-                await_promise=True,
-                user_gesture=True,
-            )
-        )
+        try:
+            await self._tab.flash_point(*pos.center)
+        except (Exception,):
+            pass
+        #
+        # style = (
+        #     "position:absolute;z-index:99999999;padding:0;margin:0;"
+        #     "left:{:.1f}px; top: {:.1f}px;"
+        #     "opacity:1;"
+        #     "width:16px;height:16px;border-radius:50%;background:red;"
+        #     "animation:show-pointer-ani {:.2f}s ease 1;"
+        # ).format(
+        #     pos.center[0] - 8,  # -8 to account for drawn circle itself (w,h)
+        #     pos.center[1] - 8,
+        #     duration,
+        # )
+        # script = (
+        #     """
+        #     (targetElement) => {{
+        #         var css = document.styleSheets[0];
+        #         for( let css of [...document.styleSheets]) {{
+        #             try {{
+        #                 css.insertRule(`
+        #                 @keyframes show-pointer-ani {{
+        #                       0% {{ opacity: 1; transform: scale(2, 2);}}
+        #                       25% {{ transform: scale(5,5) }}
+        #                       50% {{ transform: scale(3, 3);}}
+        #                       75%: {{ transform: scale(2,2) }}
+        #                       100% {{ transform: scale(1, 1); opacity: 0;}}
+        #                 }}`,css.cssRules.length);
+        #                 break;
+        #             }} catch (e) {{
+        #                 console.log(e)
+        #             }}
+        #         }};
+        #         var _d = document.createElement('div');
+        #         _d.style = `{0:s}`;
+        #         _d.id = `{1:s}`;
+        #         document.body.insertAdjacentElement('afterBegin', _d);
+        #
+        #         setTimeout( () => document.getElementById('{1:s}').remove(), {2:d});
+        #     }}
+        #     """.format(
+        #         style,
+        #         secrets.token_hex(8),
+        #         int(duration * 1000),
+        #     )
+        #     .replace("  ", "")
+        #     .replace("\n", "")
+        # )
+        #
+        # arguments = [cdp.runtime.CallArgument(object_id=self._remote_object.object_id)]
+        # await self._tab.send(
+        #     cdp.runtime.call_function_on(
+        #         script,
+        #         object_id=self._remote_object.object_id,
+        #         arguments=arguments,
+        #         await_promise=True,
+        #         user_gesture=True,
+        #     )
+        # )
 
     async def highlight_overlay(self):
         """

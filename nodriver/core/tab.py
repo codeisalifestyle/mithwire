@@ -157,19 +157,43 @@ class Tab(Connection):
     you can act upon.
     """
 
-    browser: nodriver.core.browser.Browser
     _download_behavior: List[str] = None
+
+    @property
+    def browser(self) -> "nodriver.Browser" | Connection | None:
+        if self.parent:
+            if self.parent.target:
+                if self.parent.target.type_ == "browser":
+                    return self.parent
 
     def __init__(
         self,
-        websocket_url: str,
-        target: cdp.target.TargetInfo,
-        browser: Optional["nodriver.Browser"] = None,
+        target: cdp.target.TargetInfo | cdp.target.TargetID | str = None,
+        parent: Connection = None,
         **kwargs,
     ):
-        super().__init__(websocket_url, target, browser, **kwargs)
         self._dom = None
         self._window_id = None
+        self.target = target
+        super().__init__(target=target, parent=parent, **kwargs)
+
+    async def get_frames(self) -> List[IFrame]:
+        """find any 'connectable' frames.
+        mostly used for iframes. but this does NOT return :py:obj:`nodriver.Element` 's that are iframe.
+        it returns a list of  `py:obj:`nodriver.core.tab.IFrame`if these are available.
+        this does not guarantee to return any iframe, as some are
+        isolated by security, origins, workers or other trickery.
+
+        """
+        targets = await self.send(cdp.target.get_targets())
+        frame_ids = [
+            x.id_
+            for x in util.flatten_frame_tree(await self.send(cdp.page.get_frame_tree()))
+        ]
+        frame_targets = [
+            x for x in targets if str(x.parent_frame_id) in map(str, frame_ids)
+        ]
+        return [IFrame(target=t, parent=self) for t in frame_targets]
 
     @property
     def inspector_url(self):
@@ -198,13 +222,13 @@ class Tab(Connection):
     async def feed_cdp(
         self, cmd: Generator[dict[str, Any], dict[str, Any], Any]
     ) -> asyncio.Future:
-        return await super()._send_oneshot(cmd)
+        return await super().send(cmd)
 
     async def _prepare_headless(self):
 
         if getattr(self, "_prep_headless_done", None):
             return
-        resp = await self._send_oneshot(
+        resp = await self.send(
             cdp.runtime.evaluate(
                 expression="navigator.userAgent",
             )
@@ -214,7 +238,7 @@ class Tab(Connection):
         response, error = resp
         if response and response.value:
             ua = response.value
-            await self._send_oneshot(
+            await self.send(
                 cdp.network.set_user_agent_override(
                     user_agent=ua.replace("Headless", ""),
                 )
@@ -225,8 +249,8 @@ class Tab(Connection):
         if getattr(self, "_prep_expert_done", None):
             return
         if self.browser:
-            await self._send_oneshot(cdp.page.enable())
-            await self._send_oneshot(
+            await self.send(cdp.page.enable())
+            await self.send(
                 cdp.page.add_script_to_evaluate_on_new_document(
                     """
                     console.log("hooking attachShadow");
@@ -288,7 +312,39 @@ class Tab(Connection):
             text, best_match, return_enclosing_element
         )
         while not item:
-            await self
+
+            frame_conns = await self.get_frames()
+
+            futures = [
+                asyncio.ensure_future(
+                    fc.find_element_by_text(text, best_match, return_enclosing_element)
+                )
+                for fc in frame_conns
+            ]
+            while futures:
+
+                futures_done, futures_pending = await asyncio.wait(
+                    futures, return_when=asyncio.FIRST_COMPLETED
+                )
+
+                fd = futures_done.pop()
+                if not fd.exception():
+
+                    res = fd.result()
+                    if not res:
+
+                        futures = futures_pending
+                        continue
+                    else:
+
+                        item = res
+                        futures = None
+                        [f.cancel() for f in futures_pending]
+
+            # tasks = [asyncio.ensure_future(frame_con.find_element_by_text(text, best_match, return_enclosing_element)) for frame_con in frame_conns]
+            if item:
+                break
+
             item = await self.find_element_by_text(
                 text, best_match, return_enclosing_element
             )
@@ -466,14 +522,14 @@ class Tab(Connection):
             raise AttributeError(
                 "this page/tab has no browser attribute, so you can't use get()"
             )
+        # await self.browser.get(url, new_tab, new_window)
         if new_window and not new_tab:
             new_tab = True
-
         if new_tab:
             return await self.browser.get(url, new_tab, new_window)
         else:
             frame_id, loader_id, *_ = await self.send(cdp.page.navigate(url))
-            await self
+            await self.attach()
             return self
 
     async def query_selector_all(
@@ -891,106 +947,106 @@ class Tab(Connection):
         """
         js_code_a = (
             """
-                                                   function ___dump(obj, _d = 0) {
-                                                       let _typesA = ['object', 'function'];
-                                                       let _typesB = ['number', 'string', 'boolean'];
-                                                       if (_d == 2) {
-                                                           // console.log('maxdepth reached for ', obj);
-                                                           return
-                                                       }
-                                                       let tmp = {}
-                                                       for (let k in obj) {
-                                                           if (obj[k] == window) continue;
-                                                           let v;
-                                                           try {
-                                                               if (obj[k] === null || obj[k] === undefined || obj[k] === NaN) {
-                                                                    // console.log('obj[k] is null or undefined or Nan', k, '=>', obj[k])
-                                                                   tmp[k] = obj[k];
+                                                       function ___dump(obj, _d = 0) {
+                                                           let _typesA = ['object', 'function'];
+                                                           let _typesB = ['number', 'string', 'boolean'];
+                                                           if (_d == 2) {
+                                                               // console.log('maxdepth reached for ', obj);
+                                                               return
+                                                           }
+                                                           let tmp = {}
+                                                           for (let k in obj) {
+                                                               if (obj[k] == window) continue;
+                                                               let v;
+                                                               try {
+                                                                   if (obj[k] === null || obj[k] === undefined || obj[k] === NaN) {
+                                                                        // console.log('obj[k] is null or undefined or Nan', k, '=>', obj[k])
+                                                                       tmp[k] = obj[k];
+                                                                       continue
+                                                                   }
+                                                               } catch (e) {
+                                                                   tmp[k] = null;
                                                                    continue
                                                                }
-                                                           } catch (e) {
-                                                               tmp[k] = null;
-                                                               continue
-                                                           }
-                        
-                                                           if (_typesB.includes(typeof obj[k])) {
-                                                               tmp[k] = obj[k]
-                                                               continue
-                                                           }
-                        
-                                                           try {
-                                                               if (typeof obj[k] === 'function') {
-                                                                   tmp[k] = obj[k].toString()
+    
+                                                               if (_typesB.includes(typeof obj[k])) {
+                                                                   tmp[k] = obj[k]
                                                                    continue
                                                                }
-                        
-                        
-                                                               if (typeof obj[k] === 'object') {
-                                                                   tmp[k] = ___dump(obj[k], _d + 1);
+    
+                                                               try {
+                                                                   if (typeof obj[k] === 'function') {
+                                                                       tmp[k] = obj[k].toString()
+                                                                       continue
+                                                                   }
+    
+    
+                                                                   if (typeof obj[k] === 'object') {
+                                                                       tmp[k] = ___dump(obj[k], _d + 1);
+                                                                       continue
+                                                                   }
+    
+    
+                                                               } catch (e) {}
+    
+                                                               try {
+                                                                   tmp[k] = JSON.stringify(obj[k])
                                                                    continue
+                                                               } catch (e) {
+    
                                                                }
-                        
-                        
-                                                           } catch (e) {}
-                        
-                                                           try {
-                                                               tmp[k] = JSON.stringify(obj[k])
-                                                               continue
-                                                           } catch (e) {
-                        
+                                                               try {
+                                                                   tmp[k] = obj[k].toString();
+                                                                   continue
+                                                               } catch (e) {}
                                                            }
-                                                           try {
-                                                               tmp[k] = obj[k].toString();
-                                                               continue
-                                                           } catch (e) {}
+                                                           return tmp
                                                        }
-                                                       return tmp
-                                                   }
-                        
-                                                   function ___dumpY(obj) {
-                                                       var objKeys = (obj) => {
-                                                           var [target, result] = [obj, []];
-                                                           while (target !== null) {
-                                                               result = result.concat(Object.getOwnPropertyNames(target));
-                                                               target = Object.getPrototypeOf(target);
+    
+                                                       function ___dumpY(obj) {
+                                                           var objKeys = (obj) => {
+                                                               var [target, result] = [obj, []];
+                                                               while (target !== null) {
+                                                                   result = result.concat(Object.getOwnPropertyNames(target));
+                                                                   target = Object.getPrototypeOf(target);
+                                                               }
+                                                               return result;
                                                            }
-                                                           return result;
+                                                           return Object.fromEntries(
+                                                               objKeys(obj).map(_ => [_, ___dump(obj[_])]))
+    
                                                        }
-                                                       return Object.fromEntries(
-                                                           objKeys(obj).map(_ => [_, ___dump(obj[_])]))
-                        
-                                                   }
-                                                   ___dumpY( %s )
-                                           """
+                                                       ___dumpY( %s )
+                                               """
             % obj_name
         )
         js_code_b = (
             """
-                                    ((obj, visited = new WeakSet()) => {
-                                         if (visited.has(obj)) {
-                                             return {}
-                                         }
-                                         visited.add(obj)
-                                         var result = {}, _tmp;
-                                         for (var i in obj) {
-                                                 try {
-                                                     if (i === 'enabledPlugin' || typeof obj[i] === 'function') {
-                                                         continue;
-                                                     } else if (typeof obj[i] === 'object') {
-                                                         _tmp = recurse(obj[i], visited);
-                                                         if (Object.keys(_tmp).length) {
-                                                             result[i] = _tmp;
-                                                         }
-                                                     } else {
-                                                         result[i] = obj[i];
-                                                     }
-                                                 } catch (error) {
-                                                     // console.error('Error:', error);
-                                                 }
+                                        ((obj, visited = new WeakSet()) => {
+                                             if (visited.has(obj)) {
+                                                 return {}
                                              }
-                                        return result;
-                                    })(%s)
-                                """
+                                             visited.add(obj)
+                                             var result = {}, _tmp;
+                                             for (var i in obj) {
+                                                     try {
+                                                         if (i === 'enabledPlugin' || typeof obj[i] === 'function') {
+                                                             continue;
+                                                         } else if (typeof obj[i] === 'object') {
+                                                             _tmp = recurse(obj[i], visited);
+                                                             if (Object.keys(_tmp).length) {
+                                                                 result[i] = _tmp;
+                                                             }
+                                                         } else {
+                                                             result[i] = obj[i];
+                                                         }
+                                                     } catch (error) {
+                                                         // console.error('Error:', error);
+                                                     }
+                                                 }
+                                            return result;
+                                        })(%s)
+                                    """
             % obj_name
         )
 
@@ -1375,6 +1431,7 @@ class Tab(Connection):
         filename: Optional[PathLike] = "auto",
         format: Optional[str] = "jpeg",
         full_page: Optional[bool] = False,
+        as_base64: Optional[bool] = False,
     ) -> str:
         """
         Saves a screenshot of the page.
@@ -1386,6 +1443,7 @@ class Tab(Connection):
         :type format: str
         :param full_page: when False (default) it captures the current viewport. when True, it captures the entire page
         :type full_page: bool
+        :param as_base64: whether to return a base64 string. this will ignore path, and will not write to a file
         :return: the path/filename of saved screenshot
         :rtype: str
         """
@@ -1404,7 +1462,8 @@ class Tab(Connection):
             ext = ".png"
             format = "png"
 
-        if not filename or filename == "auto":
+        if not filename or filename == "auto" and not as_base64:
+
             parsed = urllib.parse.urlparse(self.target.url)
             parts = parsed.path.split("/")
             last_part = parts[-1]
@@ -1412,14 +1471,18 @@ class Tab(Connection):
             dt_str = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             candidate = f"{parsed.hostname}__{last_part}_{dt_str}"
             path = pathlib.Path(candidate + ext)  # noqa
-        else:
+        elif not as_base64:
             path = pathlib.Path(filename)
-        path.parent.mkdir(parents=True, exist_ok=True)
+
+        if not as_base64:
+            path.parent.mkdir(parents=True, exist_ok=True)
         data = await self.send(
             cdp.page.capture_screenshot(
                 format_=format, capture_beyond_viewport=full_page
             )
         )
+        if as_base64:
+            return data
         if not data:
             raise ProtocolException(
                 "could not take screenshot. most possible cause is the page has not finished loading yet."
@@ -1604,7 +1667,7 @@ class Tab(Connection):
         self, query: str
     ) -> typing.Dict[str, List[cdp.debugger.SearchMatch]]:
         try:
-            await self._send_oneshot(cdp.page.enable())
+            await self.send(cdp.page.enable())
             list_of_tuples = list(
                 util.flatten_frame_tree_resources(await self.get_frame_resource_tree())
             )
@@ -1622,7 +1685,7 @@ class Tab(Connection):
                     continue
                 results[resource.url] = res
         finally:
-            await self._send_oneshot(cdp.page.disable())
+            await self.send(cdp.page.disable())
 
         return results
 
@@ -1657,7 +1720,6 @@ class Tab(Connection):
             )
 
         import random
-        import tempfile
 
         loop = asyncio.get_running_loop()
         started = loop.time()
@@ -2009,7 +2071,7 @@ class Tab(Connection):
 
     async def flash_point(self, x, y, duration=0.5, size=10):
         style = (
-            "position:absolute;z-index:99999999;padding:0;margin:0;"
+            "position:fixed;z-index:99999999;padding:0;margin:0;"
             "left:{:.1f}px; top: {:.1f}px;"
             "opacity:1;"
             "width:{:d}px;height:{:d}px;border-radius:50%;background:red;"
@@ -2035,9 +2097,9 @@ class Tab(Connection):
                 _d.style = `{0:s}`;
                 _d.id = `{1:s}`;
                 document.body.insertAdjacentElement('afterBegin', _d);
-    
+
                 setTimeout( () => document.getElementById('{1:s}').remove(), {2:d});
-    
+
             """.format(
                 style, secrets.token_hex(8), int(duration * 1000)
             )
@@ -2060,138 +2122,37 @@ class Tab(Connection):
 
     def __getattr__(self, item):
         try:
-            return getattr(self._target, item)
+
+            return getattr(self.target, item)
         except AttributeError:
             raise AttributeError(
                 f'"{self.__class__.__name__}" has no attribute "%s"' % item
             )
 
-    def __repr__(self):
-        extra = ""
-        if self.target.url:
-            extra = f"[url: {self.target.url}]"
-        s = f"<{type(self).__name__} [{self.target_id}] [{self.type_}] {extra}>"
-        return s
+    # def __repr__(self):
+    #     extra = ""
+    #     if self.target:
+    #         url = getattr(self.target, 'url', None)
+    #         type_ = getattr(self.target, 'type_', None)
+    #         if url:
+    #             extra = f"[url: {url}]"
+    #         s = f"<{type(self).__name__} [{self.target}] [{type_}] {extra}>"
+    #     else:
+    #         return f"<{type(self).__name__} [unknown target]>"
+    #     return s
 
 
-#
-# from .connection import Transaction
-#
-#
-# class TargetTransaction(Transaction):
-#     session_id: cdp.target.SessionID
-#
-#     def __init__(self, cdp_obj: Generator, session_id: cdp.target.SessionID):
-#         """
-#         :param cdp_obj:
-#         """
-#         self.session_id = session_id
-#         super().__init__(cdp_obj=cdp_obj)
-#
-#     @property
-#     def message(self):
-#         return json.dumps(
-#             {
-#                 "method": self.method,
-#                 "params": self.params,
-#                 "id": self.id,
-#                 "sessionId": self.session_id,
-#             }
-#         )
-#
-#
-# class TargetSession:
-#
-#     def __init__(self, tab: Tab):
-#         self._tab = tab
-#         self._browser = tab.browser
-#         self._session_id = None
-#         self._target_id = None
-#
-#     async def create_session(
-#             self, target: Union[cdp.target.TargetID, cdp.target.TargetInfo]
-#     ):
-#         if isinstance(target, cdp.target.TargetID):
-#             target = await self._tab.send(cdp.target.get_target_info(target))
-#
-#         self._target_id: cdp.target.TargetID = await self._tab.send(
-#             cdp.target.create_target(url="")
-#         )
-#         self._session_id: cdp.target.SessionID = await self._tab.send(
-#             cdp.target.attach_to_target(self._target_id, flatten=True)
-#         )
-#
-#     async def send(self, cdp_obj: Generator[dict[str, Any], dict[str, Any], Any]):
-#         tx = TargetTransaction(cdp_obj, self._session_id)
-#         tx.id = next(self._tab.__count__)
-#         self._tab.mapper.update({tx.id: tx})
-#         return await self._tab.send(
-#             cdp.target.send_message_to_target(
-#                 json.dumps(tx.message), self._session_id, target_id=self._target_id
-#             )
-#         )
-#
-# #
-# # class Frame(cdp.page.Frame):
-# #     execution_contexts: typing.Dict[str, ExecutionContext] = {}
-# #
-# #     def __init__(self, id_: cdp.page.FrameId, **kw):
-# #         none_gen = itertools.repeat(None)
-# #         param_names = util.get_all_param_names(self.__class__)
-# #         param_names.remove("execution_contexts")
-# #         for k in kw:
-# #             param_names.remove(k)
-# #         params = dict(zip(param_names, none_gen))
-# #         params.update({"id_": id_, **kw})
-# #         super().__init__(**params)
-#
-# #
-# # class ExecutionContext(dict):
-# #     id: cdp.runtime.ExecutionContextId
-# #     frame_id: str
-# #     unique_id: str
-# #     _tab: Tab
-# #
-# #     def __init__(self, *a, **kw):
-# #         super().__init__()
-# #         super().__setattr__("__dict__", self)
-# #         d: typing.Dict[str, Union[Tab, str]] = dict(*a, **kw)
-# #         self._tab: Tab = d.pop("tab", None)
-# #         self.__dict__.update(d)
-# #
-# #     def __repr__(self):
-# #         return "<ExecutionContext (\n{}\n)".format(
-# #             "".join(f"\t{k} = {v}\n" for k, v in super().items() if k not in ("_tab"))
-# #         )
-# #
-# #     async def evaluate(
-# #             self,
-# #             expression,
-# #             allow_unsafe_eval_blocked_by_csp: bool = True,
-# #             await_promises: bool = False,
-# #             generate_preview: bool = False,
-# #     ):
-# #         try:
-# #             raw = await self._tab.send(
-# #                 cdp.runtime.evaluate(
-# #                     expression=expression,
-# #                     context_id=self.get("id_"),
-# #                     generate_preview=generate_preview,
-# #                     return_by_value=False,
-# #                     allow_unsafe_eval_blocked_by_csp=allow_unsafe_eval_blocked_by_csp,
-# #                     await_promise=await_promises,
-# #                 )
-# #             )
-# #             if raw:
-# #                 remote_object, errors = raw
-# #                 if errors:
-# #                     raise ProtocolException(errors)
-# #
-# #                 if remote_object:
-# #                     return remote_object
-# #
-# #                 # else:
-# #                 #     return remote_object, errors
-# #
-# #         except:  # noqa
-# #             raise
+class IFrame(Tab):
+    """
+    a iframe is like a `nodriver.Tab`, a connection to an iframe
+    """
+
+    def __init__(
+        self,
+        target: cdp.target.TargetID | cdp.target.TargetInfo,
+        parent: Connection,
+        **kwargs,
+    ):
+        super().__init__(
+            websocket_url=parent.websocket_url, target=target, parent=parent, **kwargs
+        )
