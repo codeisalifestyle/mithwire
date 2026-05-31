@@ -1699,19 +1699,28 @@ class Tab(Connection):
         retry_interval: float = 2.0,
     ):
         """
-        Solve a Cloudflare Turnstile challenge by locating the checkbox via
-        template matching and clicking it.
+        Solve a Cloudflare challenge (Turnstile widget or managed-challenge
+        interstitial).
 
-        Supports both light and dark mode widgets and handles HiDPI/Retina
-        displays by scaling templates to match the device pixel ratio.
+        Primary strategy is DOM geometry: when an explicit Turnstile widget is
+        present (``.cf-turnstile`` / ``[data-sitekey]``) its bounding box is read
+        and the checkbox is clicked at the widget's left-center. This is robust
+        across Cloudflare widget restyles, light/dark themes and HiDPI displays,
+        because it never depends on pixel-matching a screenshot. The widget
+        renders inside a closed shadow-root iframe, so the checkbox itself is not
+        directly queryable -- only the host element's geometry is.
 
-        :param template_image: optional path to a custom template image.
-            If not provided, bundled light and dark mode templates are used.
+        For full-page managed-challenge interstitials (no widget handle in the
+        parent document) it falls back to OpenCV template matching against the
+        bundled checkbox templates (or ``template_image``), with HiDPI scaling.
+
+        :param template_image: optional path to a custom template image, used
+            only by the template-matching fallback.
         :param flash: show a visual indicator at the click location.
         :param max_retries: number of attempts before giving up.
         :param timeout: total time budget in seconds.
         :param retry_interval: seconds between retries.
-        :return: True if solved, False otherwise.
+        :return: True if solved (or no challenge present), False otherwise.
         """
         if self.browser and self.browser.config and self.browser.config.expert:
             raise Exception(
@@ -1730,36 +1739,44 @@ class Tab(Connection):
                 break
             attempt += 1
 
-            coords = await self.template_location(template_image=template_image)
-            if coords is None:
-                page_content = await self.get_content()
-                lower = page_content.lower()
-                has_challenge = any(
-                    kw in lower
-                    for kw in ("challenge", "turnstile", "verify you are human")
-                )
-                if not has_challenge:
-                    logger.info("verify_cf: no challenge detected on page")
-                    return True
-                logger.debug("verify_cf: challenge present but template not matched (attempt %d)", attempt)
+            state = await self._cf_state()
+            if state in ("solved", "none"):
+                logger.info("verify_cf: no challenge pending (state=%s)", state)
+                return True
+
+            clicked = False
+            if state == "widget":
+                rect = await self._cf_widget_rect()
+                if rect is not None:
+                    cx = rect["x"] + random.uniform(26.0, 34.0)
+                    cy = rect["y"] + rect["h"] / 2 + random.uniform(-3.0, 3.0)
+                    await self.sleep(random.uniform(0.3, 0.8))
+                    await self.mouse_click(cx, cy)
+                    logger.info("verify_cf: clicked widget checkbox at (%.0f, %.0f) attempt %d", cx, cy, attempt)
+                    if flash:
+                        await self.flash_point(int(cx), int(cy))
+                    clicked = True
+
+            if not clicked:
+                coords = await self.template_location(template_image=template_image)
+                if coords is not None:
+                    cx, cy = coords
+                    cx += random.uniform(-2.0, 2.0)
+                    cy += random.uniform(-2.0, 2.0)
+                    await self.sleep(random.uniform(0.3, 0.8))
+                    await self.mouse_click(cx, cy)
+                    logger.info("verify_cf: clicked template match at (%.0f, %.0f) attempt %d", cx, cy, attempt)
+                    if flash:
+                        await self.flash_point(int(cx), int(cy))
+                    clicked = True
+
+            if not clicked:
+                logger.debug("verify_cf: no checkbox located (state=%s, attempt %d)", state, attempt)
                 await self.sleep(retry_interval)
                 continue
 
-            cx, cy = coords
-            cx += random.uniform(-2, 2)
-            cy += random.uniform(-2, 2)
-
-            await self.sleep(random.uniform(0.3, 0.8))
-            await self.mouse_click(cx, cy)
-            logger.info("verify_cf: clicked at (%.0f, %.0f) attempt %d", cx, cy, attempt)
-            if flash:
-                await self.flash_point(int(cx), int(cy))
-
             await self.sleep(random.uniform(2.5, 4.0))
-
-            page_content = await self.get_content()
-            lower = page_content.lower()
-            if "verify you are human" not in lower and "performing security verification" not in lower:
+            if await self._cf_state() in ("solved", "none"):
                 logger.info("verify_cf: challenge solved after %d attempt(s)", attempt)
                 return True
 
@@ -1768,6 +1785,54 @@ class Tab(Connection):
 
         logger.warning("verify_cf: failed to solve challenge after %d attempts", attempt)
         return False
+
+    async def _cf_state(self) -> str:
+        """
+        Classify the current Cloudflare challenge state from the parent document.
+
+        :return: ``"solved"`` (Turnstile token present), ``"widget"`` (an explicit
+            Turnstile widget is rendered and unsolved), ``"challenge"`` (managed
+            challenge interstitial, no widget handle) or ``"none"``.
+        """
+        return await self.evaluate(
+            "(() => {"
+            "  const resp = document.querySelector('[name=\"cf-turnstile-response\"]');"
+            "  if (resp && resp.value) return 'solved';"
+            "  const widget = document.querySelector('.cf-turnstile, #cf-turnstile, [data-sitekey]');"
+            "  if (widget) {"
+            "    const r = widget.getBoundingClientRect();"
+            "    if (r.width >= 10 && r.height >= 10) return 'widget';"
+            "  }"
+            "  if (document.querySelector('#challenge-form, #challenge-running, #cf-challenge-running')) return 'challenge';"
+            "  const title = (document.title || '').toLowerCase();"
+            "  if (title.includes('just a moment') || title.includes('attention required')) return 'challenge';"
+            "  const txt = (document.body ? document.body.innerText : '').toLowerCase();"
+            "  const kws = ['verify you are human', 'performing security verification',"
+            "    'checking your browser', 'needs to review the security'];"
+            "  for (const kw of kws) { if (txt.includes(kw)) return 'challenge'; }"
+            "  return 'none';"
+            "})()"
+        )
+
+    async def _cf_widget_rect(self) -> Union[dict, None]:
+        """Bounding rect (CSS px) of an explicit Turnstile widget host, or None."""
+        import json
+
+        raw = await self.evaluate(
+            "(() => {"
+            "  const el = document.querySelector('.cf-turnstile, #cf-turnstile, [data-sitekey]');"
+            "  if (!el) return '';"
+            "  const r = el.getBoundingClientRect();"
+            "  if (r.width < 10 || r.height < 10) return '';"
+            "  return JSON.stringify({x: r.x, y: r.y, w: r.width, h: r.height});"
+            "})()"
+        )
+        if not raw:
+            return None
+        try:
+            return json.loads(raw)
+        except (TypeError, ValueError):
+            return None
 
     async def template_location(
         self, template_image: PathLike = None
