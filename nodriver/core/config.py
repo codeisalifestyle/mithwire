@@ -193,8 +193,11 @@ class Config:
             args.append("--headless=new")
         if not self.sandbox:
             args.append("--no-sandbox")
-        if self.host:
-            args.append("--remote-debugging-host=%s" % self.host)
+        # Chrome 136+ silently ignores --remote-debugging-port unless an explicit
+        # bind address is also provided, which leaves the DevTools websocket
+        # unreachable and makes Browser.start fail with a "Failed to connect to
+        # browser" error. Always emit the host flag, defaulting to 127.0.0.1.
+        args.append("--remote-debugging-host=%s" % (self.host or "127.0.0.1"))
         if self.port:
             args.append("--remote-debugging-port=%s" % self.port)
         return args
