@@ -366,17 +366,33 @@ class Browser(Connection):
 
         self._http = HTTPApi((self.config.host, self.config.port))
         util.get_registered_instances().add(self)
-        await asyncio.sleep(0.25)
-        for _ in range(5):
+        # Connect to the freshly-spawned Chrome's DevTools endpoint. The old
+        # loop budgeted only ~2.75s (5 attempts x 0.5s), which is tight: a
+        # cold Chrome typically binds its DevTools port in ~1-2s, leaving
+        # <1s of headroom. Any system hiccup (Spotlight scan, antivirus
+        # scan-on-execute, contended host, Chrome auto-update install) eats
+        # the margin and surfaces as a spurious "Failed to connect to
+        # browser" -- even though Chrome is fine and would have come up a
+        # moment later.
+        #
+        # Strategy: exponential backoff (50ms doubling, capped at 1s)
+        # against a wall-clock deadline of ~10s. Warm starts converge in a
+        # few probes; cold/contended starts get a real chance to finish;
+        # genuinely broken launches still fail in bounded time.
+        deadline = asyncio.get_running_loop().time() + 10.0
+        delay = 0.05
+        last_exc: BaseException | None = None
+        while True:
             try:
                 self.info = ContraDict(await self._http.get("version"), silent=True)
-
-            except (Exception,):
-                if _ == 4:
-                    logger.debug("could not start", exc_info=True)
-                await asyncio.sleep(0.5)
-            else:
                 break
+            except Exception as exc:
+                last_exc = exc
+                if asyncio.get_running_loop().time() + delay >= deadline:
+                    logger.debug("could not start", exc_info=True)
+                    break
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 1.0)
 
         if not self.info:
             raise Exception(
