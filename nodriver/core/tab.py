@@ -224,27 +224,6 @@ class Tab(Connection):
     ) -> asyncio.Future:
         return await super().send(cmd)
 
-    async def _prepare_headless(self):
-
-        if getattr(self, "_prep_headless_done", None):
-            return
-        resp = await self.send(
-            cdp.runtime.evaluate(
-                expression="navigator.userAgent",
-            )
-        )
-        if not resp:
-            return
-        response, error = resp
-        if response and response.value:
-            ua = response.value
-            await self.send(
-                cdp.network.set_user_agent_override(
-                    user_agent=ua.replace("Headless", ""),
-                )
-            )
-        setattr(self, "_prep_headless_done", True)
-
     async def _prepare_expert(self):
         if getattr(self, "_prep_expert_done", None):
             return
