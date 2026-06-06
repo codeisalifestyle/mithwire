@@ -19,8 +19,8 @@ import time
 import unittest
 from unittest.mock import AsyncMock, patch
 
-import nodriver as uc
-import nodriver.core.browser as browser_mod
+import mithwire as uc
+import mithwire.core.browser as browser_mod
 
 
 class _FakeProc:

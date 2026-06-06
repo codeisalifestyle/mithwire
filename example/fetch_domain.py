@@ -1,10 +1,10 @@
 try:
-    from nodriver import *
+    from mithwire import *
 except (ModuleNotFoundError, ImportError):
     import os
     import sys
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-    from nodriver import *
+    from mithwire import *
 
 import logging
 

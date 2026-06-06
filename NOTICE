@@ -1,0 +1,23 @@
+mithwire
+Copyright 2026 Elendil Technologies
+
+This product is a fork of and derivative work based on:
+
+    nodriver
+    Copyright UltrafunkAmsterdam
+    https://github.com/UltrafunkAmsterdam/nodriver
+
+nodriver is itself the successor of undetected-chromedriver by the same author.
+
+mithwire is distributed under the GNU Affero General Public License v3.0
+(AGPL-3.0), the same license as the original work. The full license text is
+in LICENSE.txt.
+
+In accordance with AGPL-3.0 section 5(a), this is a modified version of the
+original software. Modifications were made in 2026 by Elendil Technologies,
+including (but not limited to) renaming the project and import package to
+"mithwire" and ongoing anti-bot detection improvements.
+
+The original copyright notices and license have been preserved. This NOTICE
+file does not grant any trademark rights and does not imply endorsement by,
+or affiliation with, the original author(s).

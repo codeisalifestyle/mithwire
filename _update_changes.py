@@ -7,7 +7,7 @@ from packaging.version import Version
 docs = Path("docs")
 example = Path("example")
 dist = Path("dist")
-egg = Path("nodriver.egg-info")
+egg = Path("mithwire.egg-info")
 
 
 def find_file(pattern: str, root: str = ".", recursive: bool = True):
@@ -77,8 +77,8 @@ subprocess.run("make.bat html", shell=True, cwd="./docs")
 subprocess.run("make.bat markdown", shell=True, cwd="./docs")
 # subprocess.run("copy docs\\_build\\markdown\\README.md .", shell=True)
 
-subprocess.run("black nodriver/core/*.py")
-subprocess.run("isort nodriver/core")
+subprocess.run("black mithwire/core/*.py")
+subprocess.run("isort mithwire/core")
 change_version()
 modified_files = list(
     m[1] for m in re.finditer("modified:\s+(.+)", subprocess.getoutput("git status"))

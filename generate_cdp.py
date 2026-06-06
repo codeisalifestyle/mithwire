@@ -910,7 +910,7 @@ class CdpDomain:
             docs += f"{self.description}\n\n"
         if self.experimental:
             docs += "*This CDP domain is experimental.*\n\n"
-        docs += f".. module:: nodriver.cdp.{self.module}\n\n"
+        docs += f".. module:: mithwire.cdp.{self.module}\n\n"
         docs += "* Types_\n* Commands_\n* Events_\n\n"
 
         docs += "Types\n-----\n\n"
@@ -1061,8 +1061,8 @@ def selfgen():
         if not p.exists():
             dl_file(p.name)
 
-    output_path = here / "nodriver" / "cdp"
-    docs_path = here / "docs" / "nodriver" / "cdp"
+    output_path = here / "mithwire" / "cdp"
+    docs_path = here / "docs" / "mithwire" / "cdp"
 
     output_path.mkdir(exist_ok=True)
     docs_path.mkdir(exist_ok=True)

@@ -63,7 +63,7 @@ Some features
 * descriptive __repr__ for elements, which represent the element as html
 
 * utility function to convert a running undetected_chromedriver.Chrome instance
-  to a nodriver.Browser instance and contintue from there
+  to a mithwire.Browser instance and contintue from there
 
 * packed with helpers and utility methods for most used and important operations
 
@@ -91,17 +91,17 @@ Some features
 Quick start
 --------------
 .. toctree::
-    nodriver/quickstart
+    mithwire/quickstart
 
 
 Main objects
 --------------
 .. toctree::
 
-    nodriver/classes/browser
-    nodriver/classes/tab
-    nodriver/classes/element
-    nodriver/classes/others_and_helpers
+    mithwire/classes/browser
+    mithwire/classes/tab
+    mithwire/classes/element
+    mithwire/classes/others_and_helpers
 
 
 CDP object
@@ -109,6 +109,6 @@ CDP object
 
 .. toctree::
 
-    nodriver/cdp
+    mithwire/cdp
 
 

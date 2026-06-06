@@ -57,7 +57,7 @@ Some features
 * descriptive __repr__ for elements, which represent the element as html
 
 * utility function to convert a running undetected_chromedriver.Chrome instance
-  to a nodriver.Browser instance and contintue from there
+  to a mithwire.Browser instance and contintue from there
 
 * packed with helpers and utility methods for most used and important operations
 
@@ -138,7 +138,7 @@ Installation
 
 .. code-block::
 
-    pip install nodriver
+    pip install mithwire
 
 
 .. _getting-started-commands:
@@ -153,7 +153,7 @@ type or paste a few lines and off you go.
 .. code-block:: python
 
     import asyncio
-    import nodriver as uc
+    import mithwire as uc
 
     async def main():
         browser = await uc.start()
@@ -195,7 +195,7 @@ shows a script to create a twitter account
 
     logging.basicConfig(level=30)
 
-    import nodriver as uc
+    import mithwire as uc
 
     months = [
         "january",

@@ -1,4 +1,6 @@
-recursive-include nodriver/core *
-recursive-include nodriver/cdp *
+include LICENSE.txt
+include NOTICE
+recursive-include mithwire/core *
+recursive-include mithwire/cdp *
 global-exclude */__pycache__/*
 global-exclude *.pyc

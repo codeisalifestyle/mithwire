@@ -13,13 +13,13 @@ logging.basicConfig(level=10)
 
 
 try:
-    import nodriver as uc
+    import mithwire as uc
 except (ModuleNotFoundError, ImportError):
     import os
     import sys
 
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-    import nodriver as uc
+    import mithwire as uc
 
 import time
 

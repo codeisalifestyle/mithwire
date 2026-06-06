@@ -22,3 +22,6 @@ build/
 .cursor/
 *.log
 uv.lock
+
+# Generated Sphinx output (regenerate with sphinx-build)
+docs/_build/

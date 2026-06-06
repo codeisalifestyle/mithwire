@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, os.path.abspath("../"))
 
-project = "nodriver"
+project = "mithwire"
 copyright = "2023, Author"
 author = "Author"
 

@@ -1,9 +1,11 @@
-NODRIVER-REFORGED
+MITHWIRE
 =======================
 
 ### A maintained fork of [nodriver](https://github.com/ultrafunkamsterdam/nodriver) with modern anti-bot bypass improvements.
 
-This fork addresses real-world limitations encountered when using nodriver against modern anti-bot systems. Fixes are applied as they are discovered during active usage across projects.
+> **Origin & license.** mithwire is a fork of [nodriver](https://github.com/ultrafunkamsterdam/nodriver) by UltrafunkAmsterdam, which is itself the successor of undetected-chromedriver. It is distributed under the **GNU AGPL-3.0**, the same license as the upstream project. The original copyright and license are preserved in `LICENSE.txt`; see `NOTICE` for attribution details. mithwire is not affiliated with or endorsed by the original author.
+
+This fork addresses real-world limitations encountered when using it against modern anti-bot systems. Fixes are applied as they are discovered during active usage across projects.
 
 #### Improvements over upstream
 
@@ -16,14 +18,14 @@ This fork addresses real-world limitations encountered when using nodriver again
 #### Installation
 
 ```bash
-pip install git+https://github.com/codeisalifestyle/nodriver-reforged.git
+pip install git+https://github.com/codeisalifestyle/mithwire.git
 ```
 
 ---
 
 *Original README follows:*
 
-### nodriver provides next level async webscraping and browser automation library for python with an easy interface which Just Makes Sense ™
+### mithwire provides next level async webscraping and browser automation library for python with an easy interface which Just Makes Sense ™
 
 
 * **This is the official successor of the** [Undetected-Chromedriver](https://github.com/ultrafunkamsterdam/undetected-chromedriver/) **python package.**
@@ -79,7 +81,7 @@ to fully customizable everything using the entire array of
 * can connect to a running chrome debug session
 * descriptive \_\_repr_\_ for elements, which represent the element as html
 * utility function to convert a running undetected_chromedriver.Chrome instance
-  to a nodriver.Browser instance and contintue from there
+  to a mithwire.Browser instance and contintue from there
 * packed with helpers and utility methods for most used and important operations
 
 what is new
@@ -136,17 +138,17 @@ alternatively this package can be used in headless mode.
 
 
 
-#### you can use pip to install nodriver
+#### you can use pip to install mithwire
 
 ```default
-pip install nodriver
+pip install mithwire
 ```
 
 To update
 ---------
 
 ```default
-pip install -U nodriver
+pip install -U mithwire
 ```
 
 
@@ -163,7 +165,7 @@ simple
 --------------
 
 ```python
-import nodriver as uc
+import mithwire as uc
 
 async def main():
 
@@ -183,7 +185,7 @@ Custom starting options
 I’ll leave out the async boilerplate here
 
 ```python
-from nodriver import *
+from mithwire import *
 
 browser = await start(
     headless=False,
@@ -201,7 +203,7 @@ Custom options using the Config object
 I’ll leave out the async boilerplate here
 
 ```python 
-from nodriver import *
+from mithwire import *
 
 config = Config()
 config.headless = False
@@ -215,11 +217,11 @@ config.lang="en-US"   # this could set iso-language-code in navigator, not recom
 some impression
 ----
 ```python 
-import nodriver
+import mithwire
 
 async def main():
 
-    browser = await nodriver.start()
+    browser = await mithwire.start()
     page = await browser.get('https://www.nowsecure.nl')
 
     await page.save_screenshot()
@@ -265,7 +267,7 @@ import logging
 
 logging.basicConfig(level=30)
 
-import nodriver as uc
+import mithwire as uc
 
 months = [
     "january",

@@ -1,11 +1,11 @@
 try:
-    from nodriver import *
+    from mithwire import *
 except (ModuleNotFoundError, ImportError):
     import os
     import sys
 
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-    from nodriver import *
+    from mithwire import *
 
 from pathlib import Path
 
@@ -17,13 +17,13 @@ DELAY = 2
 
 
 try:
-    from nodriver import *
+    from mithwire import *
 except (ModuleNotFoundError, ImportError):
     import os
     import sys
 
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-    from nodriver import *
+    from mithwire import *
 
 
 async def main():
@@ -70,7 +70,7 @@ async def main():
     # so for this one, we use the flag return_enclosing_element and set it to False
     title_field = await tab.find("give your post a unique title", best_match=True)
     print(title_field)
-    await title_field.send_keys("undetected nodriver")
+    await title_field.send_keys("undetected mithwire")
 
     grab_link = await tab.find("grab a link", best_match=True)
     await grab_link.click()
