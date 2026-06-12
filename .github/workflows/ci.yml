@@ -1,0 +1,41 @@
+name: CI
+
+# The engine had no automated gate before this: every change reached PyPI
+# validated only by whatever ran on a maintainer's laptop. This restores the
+# floor -- the engine's own pytest suite runs on every push to main and every
+# PR, on a clean checkout with locked-from-pyproject dependencies.
+#
+# The current engine tests (connect-retry regression) are fully mocked: they
+# stub asyncio.create_subprocess_exec and the CDP attach/update calls, so NO
+# real Chrome is required. If/when Chrome-dependent tests are added, mirror the
+# setup-chrome + AppArmor steps from mithwire-mcp's CI here and tag those tests
+# so this fast lane stays Chrome-free.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit tests (no Chrome)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+      - name: Install Python + dependencies
+        run: uv sync --group dev
+      - name: Run tests
+        run: uv run pytest -v

@@ -1,0 +1,138 @@
+name: release
+
+# One workflow owns the whole release path so that every PyPI upload comes
+# from THIS file (`release.yml`). PyPI/TestPyPI Trusted Publishing matches the
+# OIDC token against the exact workflow filename + environment that were
+# registered as the trusted publisher, so the upload step cannot be moved into
+# another workflow without breaking the OIDC match.
+#
+# Two entry points:
+#   * push to main  -> release-please maintains a release PR; when that PR is
+#                      merged, release-please bumps the version, tags, and cuts
+#                      a GitHub Release. The same run then builds and publishes.
+#   * workflow_dispatch -> a TestPyPI-only dry run. Builds a throwaway
+#                      ``<version>.devNNNN`` so the chain (OIDC -> environment ->
+#                      trusted publisher -> upload) can be exercised without
+#                      cutting a real release or colliding with an existing one.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why this manual TestPyPI dry run (audit note only)."
+        required: false
+        default: "manual TestPyPI dry run"
+
+# release-please needs to open/refresh PRs and push tags + releases.
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # 1. release-please: the only job that runs on an ordinary push to main.
+  #    It keeps the release PR in sync and, on merge, creates the tag/release.
+  release-please:
+    name: Release PR / tag
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.rp.outputs['.--release_created'] }}
+      tag_name: ${{ steps.rp.outputs['.--tag_name'] }}
+      version: ${{ steps.rp.outputs['.--version'] }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: rp
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # 2. build: runs on a real release (release_created) OR a manual dry run.
+  #    Produces a single sdist+wheel artifact consumed by both publish jobs so
+  #    the exact same bytes go to TestPyPI and (for stable releases) PyPI.
+  build:
+    name: Build distribution
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      is_prerelease: ${{ steps.ver.outputs.is_prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+      - name: Resolve version
+        id: ver
+        run: |
+          set -euo pipefail
+          BASE=$(python3 -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Dry run: never collide with an existing TestPyPI version, never
+            # look like a real release. Only the project version line is
+            # anchored at column 0, so this rewrites exactly that one line.
+            VER="${BASE}.dev$(date +%Y%m%d%H%M%S)"
+            sed -i -E "s/^version = \".*\"/version = \"${VER}\"/" pyproject.toml
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            # Real release: trust release-please's bump already on main HEAD.
+            VER="$BASE"
+            case "$VER" in
+              *a*|*b*|*rc*|*dev*|*post*) echo "is_prerelease=true"  >> "$GITHUB_OUTPUT" ;;
+              *)                          echo "is_prerelease=false" >> "$GITHUB_OUTPUT" ;;
+            esac
+          fi
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "Building version $VER"
+      - name: Build
+        run: uv build
+      - name: Show artifacts
+        run: ls -l dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  # 3. TestPyPI: always runs after a successful build (dry run or real release).
+  #    skip-existing keeps a re-run idempotent instead of hard-failing on a
+  #    version that is already on the index.
+  testpypi:
+    name: Publish to TestPyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  # 4. PyPI: only for a real, non-prerelease release. The `pypi` environment
+  #    carries the manual-approval gate and is matched by the prod trusted
+  #    publisher (configure both before the first stable tag).
+  pypi:
+    name: Publish to PyPI
+    needs: [release-please, build]
+    if: ${{ needs.release-please.outputs.release_created == 'true' && needs.build.outputs.is_prerelease == 'false' }}
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
