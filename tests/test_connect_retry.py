@@ -75,10 +75,15 @@ def _patches():
             "asyncio.create_subprocess_exec",
             AsyncMock(return_value=_FakeProc()),
         ),
-        # `attach()` opens a CDP websocket; `update_targets()` issues CDP calls.
-        # Neither is the unit under test; stub both to no-ops.
+        # `attach()` opens a CDP websocket; `update_targets()` issues CDP calls;
+        # `_apply_stealth()` drives CDP overrides + new-document scripts against
+        # the live tab. None of the three is the unit under test (the connect
+        # loop), and all require a real browser/websocket, so stub them to
+        # no-ops -- otherwise they raise on the mocked CDP and `_apply_stealth`
+        # would also charge its real ~1.2s settle sleep into the timing asserts.
         patch.object(browser_mod.Browser, "attach", AsyncMock()),
         patch.object(browser_mod.Browser, "update_targets", AsyncMock()),
+        patch.object(browser_mod.Browser, "_apply_stealth", AsyncMock()),
     )
 
 
@@ -91,8 +96,8 @@ class ConnectRetryTest(unittest.IsolatedAsyncioTestCase):
         stub = _http_api_failing_n_times(5)
         config = uc.Config(headless=True, sandbox=True)
 
-        sub_patch, attach_patch, update_patch = _patches()
-        with sub_patch, attach_patch, update_patch, \
+        sub_patch, attach_patch, update_patch, stealth_patch = _patches()
+        with sub_patch, attach_patch, update_patch, stealth_patch, \
              patch.object(browser_mod, "HTTPApi", stub):
             t0 = time.monotonic()
             browser = await browser_mod.Browser.create(config)
@@ -116,8 +121,8 @@ class ConnectRetryTest(unittest.IsolatedAsyncioTestCase):
         # so within a bounded (~10-12s) wall-clock budget.
         config = uc.Config(headless=True, sandbox=True)
 
-        sub_patch, attach_patch, update_patch = _patches()
-        with sub_patch, attach_patch, update_patch, \
+        sub_patch, attach_patch, update_patch, stealth_patch = _patches()
+        with sub_patch, attach_patch, update_patch, stealth_patch, \
              patch.object(browser_mod, "HTTPApi", _AlwaysFailHTTPApi):
             t0 = time.monotonic()
             with self.assertRaises(Exception) as ctx:
@@ -137,8 +142,8 @@ class ConnectRetryTest(unittest.IsolatedAsyncioTestCase):
         stub = _http_api_failing_n_times(0)
         config = uc.Config(headless=True, sandbox=True)
 
-        sub_patch, attach_patch, update_patch = _patches()
-        with sub_patch, attach_patch, update_patch, \
+        sub_patch, attach_patch, update_patch, stealth_patch = _patches()
+        with sub_patch, attach_patch, update_patch, stealth_patch, \
              patch.object(browser_mod, "HTTPApi", stub):
             t0 = time.monotonic()
             browser = await browser_mod.Browser.create(config)
