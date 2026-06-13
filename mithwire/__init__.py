@@ -33,4 +33,4 @@ __all__ = [
     "compute_launch_args",
 ]
 
-__version__ = "0.50.3"
+__version__ = "0.50.4"

@@ -5,6 +5,13 @@ automatically by [release-please](https://github.com/googleapis/release-please);
 entries below are generated from [Conventional Commit](https://www.conventionalcommits.org/)
 messages. Do not edit released sections by hand.
 
+## [0.50.4](https://github.com/codeisalifestyle/mithwire/compare/v0.50.3...v0.50.4) (2026-06-13)
+
+
+### Features
+
+* **stealth:** engine owns all anti-detect stealth ([#2](https://github.com/codeisalifestyle/mithwire/issues/2)) ([cda7806](https://github.com/codeisalifestyle/mithwire/commit/cda7806112d7a7a6b05647fc47aea27f0e8ea8bb))
+
 ## [0.50.3] - 2026-06-04
 
 Rebrand to `mithwire`: a maintained, stealth-focused fork of nodriver that
