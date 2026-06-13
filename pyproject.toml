@@ -2,7 +2,7 @@
 
 name = "mithwire" # Required
 
-version = "0.50.4"  # Required
+version = "0.50.5"  # Required
 
 description = "Stealth browser automation framework that talks directly to Chrome via CDP (no webdriver, no chromedriver). A maintained fork of nodriver."
 readme = {file = "README.md", content-type = "text/markdown"} # Optional
