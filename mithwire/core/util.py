@@ -42,6 +42,8 @@ async def start(
     host: Optional[str] = None,
     port: Optional[int] = None,
     expert: Optional[bool] = None,
+    fingerprint: Optional[object] = None,
+    webrtc_leak_protection: str = "auto",
     **kwargs: Optional[dict],
 ) -> Browser:
     """
@@ -96,6 +98,8 @@ async def start(
             host=host,
             port=port,
             expert=expert,
+            fingerprint=fingerprint,
+            webrtc_leak_protection=webrtc_leak_protection,
             **kwargs,
         )
     from .browser import Browser
