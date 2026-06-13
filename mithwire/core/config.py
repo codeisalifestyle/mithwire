@@ -45,6 +45,8 @@ class Config:
         host: str = AUTO,
         port: int = AUTO,
         expert: bool = AUTO,
+        fingerprint: Optional[object] = None,
+        webrtc_leak_protection: str = "auto",
         **kwargs: dict,
     ):
         """
@@ -110,6 +112,17 @@ class Config:
         self.autodiscover_targets = True
         self.lang = lang
 
+        # Anti-detect stealth identity. The engine owns all browser-altering
+        # anti-detect code; a client only describes the identity it wants here.
+        # ``fingerprint`` may be a FingerprintConfig or a plain dict (normalized).
+        from ..stealth import FingerprintConfig
+
+        if fingerprint is None or isinstance(fingerprint, FingerprintConfig):
+            self.fingerprint = fingerprint
+        else:
+            self.fingerprint = FingerprintConfig.from_dict(fingerprint)
+        self.webrtc_leak_protection = webrtc_leak_protection
+
         # other keyword args will be accessible by attribute
         self.__dict__.update(kwargs)
         super().__init__()
@@ -127,6 +140,18 @@ class Config:
             "--disable-session-crashed-bubble",
             "--disable-search-engine-choice-screen",
         ]
+        # Stealth launch flags that must be set before the process starts
+        # (--lang, --force-webrtc-ip-handling-policy, headless window size).
+        # These cannot be retrofitted leak-free via CDP on a running process.
+        from ..stealth import compute_launch_args
+
+        for arg in compute_launch_args(
+            self._browser_args,
+            fingerprint=self.fingerprint,
+            headless=self.headless,
+        ):
+            if arg not in self._browser_args:
+                self._browser_args.append(arg)
 
     @property
     def browser_args(self):

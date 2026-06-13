@@ -121,6 +121,7 @@ class Browser(Connection):
         self._keep_user_data_dir = None
         self._is_updating = asyncio.Event()
         self.connection: Connection = None
+        self.stealth = None
         super().__init__("", auto_attach=False)
         logger.debug("Session object initialized: %s" % vars(self))
 
@@ -410,7 +411,44 @@ class Browser(Connection):
         self.websocket_url = self.info.webSocketDebuggerUrl
         await self.attach()
         await self.update_targets()
+        await self._apply_stealth()
         # await self
+
+    async def _apply_stealth(self) -> None:
+        """Apply the engine-owned anti-detect stealth to the live browser.
+
+        The engine owns every browser-altering anti-detect capability, so this
+        runs on every launch. With no configured identity it still applies the
+        always-on baseline (window.chrome shim, headless UA cleanup when
+        headless, WebRTC leak protection when proxied). The resulting
+        :class:`~mithwire.stealth.Stealth` is stored on ``self.stealth`` so a
+        client can re-apply an identity later (e.g. once a proxy egress geo is
+        resolved).
+        """
+        from ..stealth import Stealth
+
+        config = self.config
+        # The engine is agnostic of any client's proxy abstraction: proxy
+        # presence is inferred purely from the launch flags.
+        proxied = any(
+            str(arg).startswith("--proxy-server=")
+            for arg in (getattr(config, "_browser_args", None) or [])
+        )
+        stealth = Stealth(
+            self,
+            fingerprint=getattr(config, "fingerprint", None),
+            webrtc_leak_protection=getattr(config, "webrtc_leak_protection", "auto"),
+            headless=bool(getattr(config, "headless", False)),
+            proxied=proxied,
+        )
+        # A freshly attached tab needs a brief moment before CDP overrides and
+        # new-document scripts reliably register on the about:blank target.
+        await asyncio.sleep(1.2)
+        try:
+            await stealth.apply_all()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Anti-detect stealth application failed: %s", exc)
+        self.stealth = stealth
 
     async def grant_all_permissions(self):
         """

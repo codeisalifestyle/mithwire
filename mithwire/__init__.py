@@ -15,6 +15,7 @@ from mithwire.core.connection import Connection, ProtocolException
 from mithwire.core.element import Element
 from mithwire.core.tab import Tab
 from mithwire.core.util import loop, start
+from mithwire.stealth import FingerprintConfig, Stealth, compute_launch_args
 
 __all__ = [
     "loop",
@@ -27,6 +28,9 @@ __all__ = [
     "Element",
     "ContraDict",
     "ProtocolException",
+    "FingerprintConfig",
+    "Stealth",
+    "compute_launch_args",
 ]
 
 __version__ = "0.50.3"

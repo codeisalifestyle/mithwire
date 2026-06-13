@@ -6,21 +6,30 @@ name: release
 # registered as the trusted publisher, so the upload step cannot be moved into
 # another workflow without breaking the OIDC match.
 #
-# Two entry points:
+# Three entry points:
 #   * push to main  -> release-please maintains a release PR; when that PR is
 #                      merged, release-please bumps the version, tags, and cuts
 #                      a GitHub Release. The same run then builds and publishes.
-#   * workflow_dispatch -> a TestPyPI-only dry run. Builds a throwaway
+#   * workflow_dispatch (no tag) -> a TestPyPI-only dry run. Builds a throwaway
 #                      ``<version>.devNNNN`` so the chain (OIDC -> environment ->
 #                      trusted publisher -> upload) can be exercised without
 #                      cutting a real release or colliding with an existing one.
+#   * workflow_dispatch (tag set) -> publish that exact existing tag. Used to
+#                      salvage a tag that was cut (release_please succeeded) but
+#                      did NOT publish (e.g. an earlier output-gate misfire).
+#                      Builds from the tagged commit's pyproject.toml verbatim,
+#                      pushes to TestPyPI and PyPI.
 on:
   push:
     branches: [main]
   workflow_dispatch:
     inputs:
+      tag:
+        description: "Existing tag to (re-)publish (e.g. v0.51.0). Leave blank for a TestPyPI dry run."
+        required: false
+        default: ""
       reason:
-        description: "Why this manual TestPyPI dry run (audit note only)."
+        description: "Why this manual dispatch (audit note only)."
         required: false
         default: "manual TestPyPI dry run"
 
@@ -34,15 +43,26 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # 1. release-please: the only job that runs on an ordinary push to main.
-  #    It keeps the release PR in sync and, on merge, creates the tag/release.
+  # 1. release-please: only runs on push to main (and is a no-op on tag-replay
+  #    dispatches). It keeps the release PR in sync and, on merge, creates the
+  #    tag/release.
   release-please:
     name: Release PR / tag
+    if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
     outputs:
-      release_created: ${{ steps.rp.outputs['.--release_created'] }}
-      tag_name: ${{ steps.rp.outputs['.--tag_name'] }}
-      version: ${{ steps.rp.outputs['.--version'] }}
+      # Single-root manifest config: release-please-action v4 exposes a
+      # top-level ``release_created`` boolean that's "true" exactly when a
+      # release was cut on this run, alongside path-prefixed keys for
+      # multi-package configs. The path-prefixed access
+      # (``outputs['.--release_created']``) silently evaluates to empty for a
+      # single-root config -- that latent bug never fired here only because
+      # the engine's first publish (v0.50.3) went out via workflow_dispatch and
+      # bypassed this gate. The release-please push path needs the top-level
+      # key to publish.
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+      version: ${{ steps.rp.outputs.version }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: rp
@@ -50,19 +70,31 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-  # 2. build: runs on a real release (release_created) OR a manual dry run.
+  # 2. build: runs on a real release (release_created) OR any dispatch.
   #    Produces a single sdist+wheel artifact consumed by both publish jobs so
   #    the exact same bytes go to TestPyPI and (for stable releases) PyPI.
   build:
     name: Build distribution
     needs: release-please
-    if: ${{ needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch' }}
+    # ``needs.release-please`` is skipped on a workflow_dispatch (the job's
+    # own ``if`` excludes it), and ``always()`` lets us still run as long as
+    # we're on a release path that justifies a build.
+    if: |
+      always() && (
+        github.event_name == 'workflow_dispatch'
+        || needs.release-please.outputs.release_created == 'true'
+      )
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.ver.outputs.version }}
       is_prerelease: ${{ steps.ver.outputs.is_prerelease }}
+      publish_pypi: ${{ steps.ver.outputs.publish_pypi }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # For a tag-replay dispatch we want the tagged commit's
+          # pyproject.toml verbatim, not whatever HEAD is on main.
+          ref: ${{ github.event.inputs.tag || github.ref }}
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
@@ -72,23 +104,30 @@ jobs:
         run: |
           set -euo pipefail
           BASE=$(python3 -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          INPUT_TAG="${{ github.event.inputs.tag }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -z "$INPUT_TAG" ]; then
             # Dry run: never collide with an existing TestPyPI version, never
             # look like a real release. Only the project version line is
             # anchored at column 0, so this rewrites exactly that one line.
             VER="${BASE}.dev$(date +%Y%m%d%H%M%S)"
             sed -i -E "s/^version = \".*\"/version = \"${VER}\"/" pyproject.toml
             echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "publish_pypi=false" >> "$GITHUB_OUTPUT"
           else
-            # Real release: trust release-please's bump already on main HEAD.
+            # Real release (release-please push) OR tag replay (dispatch with
+            # tag input): trust the checked-out pyproject.toml verbatim.
             VER="$BASE"
             case "$VER" in
-              *a*|*b*|*rc*|*dev*|*post*) echo "is_prerelease=true"  >> "$GITHUB_OUTPUT" ;;
-              *)                          echo "is_prerelease=false" >> "$GITHUB_OUTPUT" ;;
+              *a*|*b*|*rc*|*dev*|*post*)
+                echo "is_prerelease=true"  >> "$GITHUB_OUTPUT"
+                echo "publish_pypi=false" >> "$GITHUB_OUTPUT" ;;
+              *)
+                echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+                echo "publish_pypi=true"  >> "$GITHUB_OUTPUT" ;;
             esac
           fi
           echo "version=$VER" >> "$GITHUB_OUTPUT"
-          echo "Building version $VER"
+          echo "Building version $VER (publish_pypi=$(grep ^publish_pypi $GITHUB_OUTPUT | cut -d= -f2))"
       - name: Build
         run: uv build
       - name: Show artifacts
@@ -99,12 +138,17 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-  # 3. TestPyPI: always runs after a successful build (dry run or real release).
-  #    skip-existing keeps a re-run idempotent instead of hard-failing on a
-  #    version that is already on the index.
+  # 3. TestPyPI: always runs after a successful build (dry run or real release
+  #    or tag replay). ``always() && build == success`` is required because
+  #    GitHub Actions' implicit ``success()`` gate evaluates the *transitive*
+  #    needs graph, so a skipped ``release-please`` (workflow_dispatch path)
+  #    cascades a skip through ``build`` even when build itself succeeded.
+  #    ``skip-existing`` keeps a re-run idempotent instead of hard-failing on
+  #    a version that is already on the index.
   testpypi:
     name: Publish to TestPyPI
     needs: build
+    if: ${{ always() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     environment: testpypi
     permissions:
@@ -119,13 +163,15 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
           skip-existing: true
 
-  # 4. PyPI: only for a real, non-prerelease release. The `pypi` environment
-  #    carries the manual-approval gate and is matched by the prod trusted
-  #    publisher (configure both before the first stable tag).
+  # 4. PyPI: stable releases only. Driven by the build's own ``publish_pypi``
+  #    output so both the release-please path and a tag-replay dispatch share
+  #    the same decision rule (non-prerelease version => publish). The
+  #    ``always() && build == success`` clause is the same skip-cascade
+  #    countermeasure as on ``testpypi``.
   pypi:
     name: Publish to PyPI
-    needs: [release-please, build]
-    if: ${{ needs.release-please.outputs.release_created == 'true' && needs.build.outputs.is_prerelease == 'false' }}
+    needs: build
+    if: ${{ always() && needs.build.result == 'success' && needs.build.outputs.publish_pypi == 'true' }}
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -136,3 +182,5 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
