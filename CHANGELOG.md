@@ -5,6 +5,13 @@ automatically by [release-please](https://github.com/googleapis/release-please);
 entries below are generated from [Conventional Commit](https://www.conventionalcommits.org/)
 messages. Do not edit released sections by hand.
 
+## [0.50.7](https://github.com/codeisalifestyle/mithwire/compare/v0.50.6...v0.50.7) (2026-06-20)
+
+
+### Bug Fixes
+
+* **stealth-diagnostic:** stop sync wrapper from shadowing the subpackage ([#10](https://github.com/codeisalifestyle/mithwire/issues/10)) ([5d2ae72](https://github.com/codeisalifestyle/mithwire/commit/5d2ae72be82c4c9986c75b4829526b139c89045c))
+
 ## [0.50.6](https://github.com/codeisalifestyle/mithwire/compare/v0.50.5...v0.50.6) (2026-06-20)
 
 
