@@ -5,9 +5,12 @@ name: CI
 # floor -- the engine's own pytest suite runs on every push to main and every
 # PR, on a clean checkout with locked-from-pyproject dependencies.
 #
-# The current engine tests (connect-retry regression) are fully mocked: they
-# stub asyncio.create_subprocess_exec and the CDP attach/update calls, so NO
-# real Chrome is required. If/when Chrome-dependent tests are added, mirror the
+# Every engine test in this lane is Chrome-free by design: the connect-retry
+# regression stubs asyncio.create_subprocess_exec and the CDP attach/update
+# calls, and the stealth-diagnostic tests cover only the no-browser surface
+# (grading logic on synthetic probe payloads, plus public-API exports and CLI
+# argparse wiring). The diagnostic's browser-driving runner is intentionally
+# NOT exercised here. If/when Chrome-dependent tests are added, mirror the
 # setup-chrome + AppArmor steps from mithwire-mcp's CI here and tag those tests
 # so this fast lane stays Chrome-free.
 on:
