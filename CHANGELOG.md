@@ -5,6 +5,13 @@ automatically by [release-please](https://github.com/googleapis/release-please);
 entries below are generated from [Conventional Commit](https://www.conventionalcommits.org/)
 messages. Do not edit released sections by hand.
 
+## [0.50.6](https://github.com/codeisalifestyle/mithwire/compare/v0.50.5...v0.50.6) (2026-06-20)
+
+
+### Features
+
+* **stealth-diagnostic:** bundle a stealth diagnostic with the engine ([#7](https://github.com/codeisalifestyle/mithwire/issues/7)) ([2070b44](https://github.com/codeisalifestyle/mithwire/commit/2070b44c8bd770c45e18fe870b7e386878898c07))
+
 ## [0.50.5](https://github.com/codeisalifestyle/mithwire/compare/v0.50.4...v0.50.5) (2026-06-13)
 
 

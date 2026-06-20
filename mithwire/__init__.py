@@ -36,4 +36,4 @@ __all__ = [
     "run_stealth_diagnostic",
 ]
 
-__version__ = "0.50.5"
+__version__ = "0.50.6"
