@@ -4,8 +4,8 @@ A diagnostic that runs a bare ``mithwire.start()`` browser against a set of
 public bot-detection sites and reports how it looks, so anyone who installs
 mithwire can check their machine, adjust their client, and re-run to verify.
 
-    from mithwire import stealth_diagnostic
-    report = stealth_diagnostic()      # headful, all sites
+    from mithwire import diagnose_stealth
+    report = diagnose_stealth()        # headful, all sites (sync)
     print(report.verdict)              # PASS / WARN / FAIL
 
 Or from the shell::
@@ -23,10 +23,10 @@ from .report import (
     build_report,
     format_report,
 )
-from .runner import run_stealth_diagnostic, stealth_diagnostic
+from .runner import diagnose_stealth, run_stealth_diagnostic
 
 __all__ = [
-    "stealth_diagnostic",
+    "diagnose_stealth",
     "run_stealth_diagnostic",
     "build_report",
     "format_report",
