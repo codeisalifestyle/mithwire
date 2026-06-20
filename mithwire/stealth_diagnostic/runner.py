@@ -16,7 +16,7 @@ from mithwire.core.util import start as _start
 from .probes import NAV_PROBE, SITES, WEBRTC_PROBE, parse, wrap
 from .report import StealthDiagnosticReport, build_report
 
-__all__ = ["run_stealth_diagnostic", "stealth_diagnostic"]
+__all__ = ["run_stealth_diagnostic", "diagnose_stealth"]
 
 
 async def _guard(coro, timeout: float, name: str) -> Any:
@@ -102,6 +102,12 @@ async def run_stealth_diagnostic(
     return build_report(raw, headless=headless)
 
 
-def stealth_diagnostic(**kwargs: Any) -> StealthDiagnosticReport:
-    """Synchronous wrapper around :func:`run_stealth_diagnostic` (engine loop)."""
+def diagnose_stealth(**kwargs: Any) -> StealthDiagnosticReport:
+    """Synchronous wrapper around :func:`run_stealth_diagnostic` (engine loop).
+
+    Named ``diagnose_stealth`` (not ``stealth_diagnostic``) on purpose: the
+    package is ``mithwire.stealth_diagnostic``, so a same-named callable would
+    shadow the subpackage on the ``mithwire`` namespace and break
+    ``import mithwire.stealth_diagnostic.<x>``.
+    """
     return _loop().run_until_complete(run_stealth_diagnostic(**kwargs))

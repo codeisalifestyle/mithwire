@@ -11,6 +11,7 @@ All assertions are deterministic and require neither Chrome nor the network.
 """
 from __future__ import annotations
 
+import types
 import unittest
 
 import mithwire
@@ -20,7 +21,7 @@ from mithwire.stealth_diagnostic.probes import SITES, parse, wrap
 
 class PublicApiTests(unittest.TestCase):
     def test_package_exports_are_callable(self):
-        for name in ("stealth_diagnostic", "run_stealth_diagnostic"):
+        for name in ("diagnose_stealth", "run_stealth_diagnostic"):
             self.assertIn(name, mithwire.__all__)
             self.assertTrue(callable(getattr(mithwire, name)))
 
@@ -28,6 +29,21 @@ class PublicApiTests(unittest.TestCase):
         # The rename should not leave a dangling alias.
         self.assertFalse(hasattr(mithwire, "selftest"))
         self.assertFalse(hasattr(mithwire, "run_selftest"))
+
+    def test_subpackage_attribute_is_the_module_not_a_function(self):
+        # Regression: the sync wrapper used to be exported as ``stealth_diagnostic``,
+        # which shadowed the ``mithwire.stealth_diagnostic`` subpackage on the
+        # ``mithwire`` namespace and broke dotted submodule imports below.
+        self.assertIsInstance(mithwire.stealth_diagnostic, types.ModuleType)
+
+    def test_dotted_submodule_import_resolves(self):
+        # ``import mithwire.stealth_diagnostic.probes as p`` compiles to IMPORT_FROM,
+        # which walks the (formerly shadowed) ``stealth_diagnostic`` attribute. This
+        # is the exact form that regressed; assert it resolves to the real module.
+        import mithwire.stealth_diagnostic.probes as p
+
+        self.assertIs(p, mithwire.stealth_diagnostic.probes)
+        self.assertTrue(p.SITES)
 
 
 class CliParserTests(unittest.TestCase):
