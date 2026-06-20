@@ -16,6 +16,7 @@ from mithwire.core.element import Element
 from mithwire.core.tab import Tab
 from mithwire.core.util import loop, start
 from mithwire.stealth import FingerprintConfig, Stealth, compute_launch_args
+from mithwire.stealth_diagnostic import run_stealth_diagnostic, stealth_diagnostic
 
 __all__ = [
     "loop",
@@ -31,6 +32,8 @@ __all__ = [
     "FingerprintConfig",
     "Stealth",
     "compute_launch_args",
+    "stealth_diagnostic",
+    "run_stealth_diagnostic",
 ]
 
 __version__ = "0.50.5"

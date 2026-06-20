@@ -41,6 +41,9 @@ dependencies = [
       "deprecated"
 ]
 
+[project.scripts]
+mithwire = "mithwire.__main__:main"
+
 #
 [project.urls]
 "Homepage" = "https://github.com/codeisalifestyle/mithwire"
