@@ -16,6 +16,8 @@ Public surface:
 
 from __future__ import annotations
 
+import sys
+
 from .controller import Stealth
 from .fingerprint import (
     FingerprintConfig,
@@ -58,6 +60,9 @@ def compute_launch_args(
     * ``--window-size`` — headless Chrome otherwise reports a default-ish screen
       that, combined with device-metric overrides, can produce impossible
       viewport/screen combinations.
+    * ``--window-position`` — on Windows, headless Chrome 129+ can still spawn a
+      blank overlay window; moving it off-screen hides the artifact without
+      affecting automation.
 
     Existing flags are never duplicated.
     """
@@ -74,7 +79,15 @@ def compute_launch_args(
         if lang and not any(arg.startswith("--lang=") for arg in existing):
             extra.append(f"--lang={lang}")
 
-    if headless and not any(arg.startswith("--window-size=") for arg in existing):
-        extra.append("--window-size=1920,1080")
+    if headless:
+        if not any(arg.startswith("--window-size=") for arg in existing):
+            extra.append("--window-size=1920,1080")
+        # Chrome 129+ on Windows shows a blank headless window on top of the
+        # desktop. Off-screen placement is the community workaround until
+        # Chromium fully suppresses the platform window in unified headless.
+        if sys.platform == "win32" and not any(
+            arg.startswith("--window-position=") for arg in existing
+        ):
+            extra.append("--window-position=-2400,-2400")
 
     return extra
