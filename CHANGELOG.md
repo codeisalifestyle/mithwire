@@ -5,6 +5,13 @@ automatically by [release-please](https://github.com/googleapis/release-please);
 entries below are generated from [Conventional Commit](https://www.conventionalcommits.org/)
 messages. Do not edit released sections by hand.
 
+## [0.50.8](https://github.com/codeisalifestyle/mithwire/compare/v0.50.7...v0.50.8) (2026-07-14)
+
+
+### Bug Fixes
+
+* **stealth:** hide headless Chrome blank window on Windows ([66734cb](https://github.com/codeisalifestyle/mithwire/commit/66734cb050f487c72429833673bb78438ae8e7d2))
+
 ## [0.50.7](https://github.com/codeisalifestyle/mithwire/compare/v0.50.6...v0.50.7) (2026-06-20)
 
 
