@@ -480,6 +480,33 @@ class Stealth:
         "iPad": "iOS",
     }
 
+    # Chrome's reduced UA string uses frozen OS tokens regardless of actual OS
+    # version (see chromium.org/updates/ua-reduction).  When a profile sets
+    # ``platform`` without an explicit ``user_agent``, we rewrite the host's own
+    # UA to carry the token matching the target platform so
+    # ``navigator.userAgent`` and ``navigator.platform`` stay consistent.
+    _PLATFORM_TO_UA_OS_TOKEN: ClassVar[dict[str, str]] = {
+        "MacIntel": "Macintosh; Intel Mac OS X 10_15_7",
+        "Win32": "Windows NT 10.0; Win64; x64",
+        "Win64": "Windows NT 10.0; Win64; x64",
+        "Linux x86_64": "X11; Linux x86_64",
+        "Linux armv81": "Linux; Android 10; K",
+    }
+
+    @classmethod
+    def _align_ua_to_platform(cls, ua: str, platform: str) -> str:
+        """Rewrite the OS token in a Chrome UA string to match *platform*.
+
+        Chrome UA strings follow ``Mozilla/5.0 (<os-token>) AppleWebKit/…``.
+        This replaces the first parenthesised section with the frozen token
+        that Chrome uses for the given ``navigator.platform`` value, keeping
+        the Chrome version and everything else intact.
+        """
+        token = cls._PLATFORM_TO_UA_OS_TOKEN.get(platform)
+        if not token:
+            return ua
+        return re.sub(r"\([^)]+\)", f"({token})", ua, count=1)
+
     def _build_ua_metadata(
         self,
         hints: dict[str, Any],
@@ -584,15 +611,22 @@ class Stealth:
         # issue it when at least one of those is requested, and we always pass a
         # user_agent (the current one if unchanged) because the param is required.
         accept_language = fp.effective_accept_language
+        effective_ua: str | None = None
         if fp.user_agent or fp.platform or accept_language:
             try:
                 current_ua = await self.tab.evaluate("navigator.userAgent")
             except Exception:  # noqa: BLE001
                 current_ua = None
             ua_string = fp.user_agent or (current_ua if isinstance(current_ua, str) else None)
+            # When the profile sets platform but not user_agent, the host's
+            # own UA may carry the wrong OS token (e.g. Linux host spoofing a
+            # Mac identity).  Rewrite the parenthesised OS section to match.
+            if ua_string and fp.platform and not fp.user_agent:
+                ua_string = self._align_ua_to_platform(ua_string, fp.platform)
             if ua_string:
                 metadata = None
                 if fp.user_agent or fp.platform:
+                    effective_ua = ua_string
                     hints = await self._read_client_hints()
                     try:
                         # Build even when live hints are empty: a custom UA
@@ -601,7 +635,7 @@ class Stealth:
                         metadata = self._build_ua_metadata(
                             hints or {},
                             platform_override=fp.platform,
-                            ua_string=fp.user_agent,
+                            ua_string=ua_string,
                         )
                     except Exception as exc:  # noqa: BLE001
                         logger.debug("UA metadata build failed: %s", exc)
@@ -616,8 +650,8 @@ class Stealth:
                     await self.tab.send(emu.set_user_agent_override(**kwargs))
                     if accept_language:
                         applied["accept_language"] = accept_language
-                    if fp.user_agent:
-                        applied["user_agent"] = ua_string
+                    if effective_ua:
+                        applied["user_agent"] = effective_ua
                     if fp.platform:
                         applied["platform"] = fp.platform
                 except Exception as exc:  # noqa: BLE001
@@ -688,8 +722,9 @@ class Stealth:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("setTouchEmulationEnabled failed: %s", exc)
 
-        # JS-only overrides (no CDP equivalent): deviceMemory and WebGL strings.
-        document_js = self._fingerprint_document_js(fp)
+        # JS-only overrides (no CDP equivalent): deviceMemory, WebGL strings,
+        # and belt-and-suspenders userAgent/platform overrides.
+        document_js = self._fingerprint_document_js(fp, effective_ua=effective_ua)
         if document_js:
             try:
                 await self.add_script_on_new_document(document_js)
@@ -737,7 +772,9 @@ class Stealth:
         except Exception as exc:  # noqa: BLE001
             logger.debug("grantPermissions(geolocation) failed: %s", exc)
 
-    def _worker_bootstrap_js(self, fp: FingerprintConfig) -> str:
+    def _worker_bootstrap_js(
+        self, fp: FingerprintConfig, *, effective_ua: str | None = None,
+    ) -> str:
         """JS run *inside* each worker to re-assert JS-only navigator props.
 
         CDP timezone/locale/hardwareConcurrency overrides already reach workers,
@@ -774,6 +811,13 @@ class Stealth:
             lines.append(
                 "Object.defineProperty(p,'platform',{get:function(){return %s;},configurable:true});"
                 % json.dumps(fp.platform)
+            )
+        # userAgent: when the UA was aligned to match the target platform, the
+        # worker must agree with the main thread or CreepJS flags the mismatch.
+        if effective_ua:
+            lines.append(
+                "Object.defineProperty(p,'userAgent',{get:function(){return %s;},configurable:true});"
+                % json.dumps(effective_ua)
             )
         nav_block = (
             "try{var p=Object.getPrototypeOf(navigator);" + "".join(lines) + "}catch(e){}"
@@ -850,10 +894,12 @@ class Stealth:
         };
     """
 
-    def _fingerprint_document_js(self, fp: FingerprintConfig) -> str | None:
+    def _fingerprint_document_js(
+        self, fp: FingerprintConfig, *, effective_ua: str | None = None,
+    ) -> str | None:
         """Build the JS for properties Chromium has no CDP override for."""
         blocks: list[str] = []
-        worker_boot = self._worker_bootstrap_js(fp)
+        worker_boot = self._worker_bootstrap_js(fp, effective_ua=effective_ua)
         wants_webgl = bool(fp.webgl_vendor or fp.webgl_renderer)
         # The native-toString mask must be defined before any patched function.
         if worker_boot or wants_webgl:
@@ -905,6 +951,16 @@ class Stealth:
             blocks.append(
                 "try{Object.defineProperty(Object.getPrototypeOf(navigator),'platform',"
                 f"{{get:()=>{json.dumps(fp.platform)},configurable:true}});}}catch(e){{}}"
+            )
+        # Belt-and-suspenders for navigator.userAgent: the CDP user_agent param
+        # handles most reads, but _clean_headless_ua may have installed an
+        # earlier instance-level JS override (HeadlessChrome cleanup) that
+        # shadows the CDP value.  We must use instance-level here too (not
+        # prototype-level) so we overwrite that earlier configurable property.
+        if effective_ua:
+            blocks.append(
+                "try{Object.defineProperty(navigator,'userAgent',"
+                f"{{get:()=>{json.dumps(effective_ua)},configurable:true}});}}catch(e){{}}"
             )
         if wants_webgl:
             blocks.append(self._webgl_patch_js(fp))
