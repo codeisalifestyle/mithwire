@@ -27,7 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any
+from typing import Any, ClassVar
 
 from ..cdp import browser as cdp_browser
 from ..cdp import emulation as cdp_emulation
@@ -466,6 +466,20 @@ class Stealth:
         ]
         return brands, full_list
 
+    # navigator.platform uses frozen legacy tokens ("MacIntel", "Win32") while
+    # navigator.userAgentData.platform / Sec-CH-UA-Platform uses brand names
+    # ("macOS", "Windows").  Profiles store the legacy token; this table maps
+    # it to the UA-CH form for _build_ua_metadata.
+    _LEGACY_TO_UACH_PLATFORM: ClassVar[dict[str, str]] = {
+        "MacIntel": "macOS",
+        "Win32": "Windows",
+        "Win64": "Windows",
+        "Linux x86_64": "Linux",
+        "Linux armv81": "Linux",
+        "iPhone": "iOS",
+        "iPad": "iOS",
+    }
+
     def _build_ua_metadata(
         self,
         hints: dict[str, Any],
@@ -475,9 +489,10 @@ class Stealth:
     ) -> Any:
         """Build a CDP ``UserAgentMetadata`` consistent with the active UA.
 
-        ``platform_override`` (e.g. ``"Windows"``) rewrites the UA-CH platform so
-        ``navigator.userAgentData.platform`` stays consistent with a spoofed
-        ``navigator.platform``. ``ua_string`` lets us re-version the Chromium /
+        ``platform_override`` is the legacy ``navigator.platform`` token (e.g.
+        ``"MacIntel"``); it is automatically mapped to the corresponding UA-CH
+        brand name (``"macOS"``) for ``navigator.userAgentData.platform`` /
+        ``Sec-CH-UA-Platform``. ``ua_string`` lets us re-version the Chromium /
         Google Chrome brands to match a custom user-agent (so the low-entropy
         brands and the full-version list agree with ``navigator.userAgent``).
         """
@@ -517,7 +532,12 @@ class Stealth:
                 return real
             return inferred[idx] if inferred else ""
 
-        platform_value = platform_override or _field("platform", 0)
+        if platform_override:
+            platform_value = self._LEGACY_TO_UACH_PLATFORM.get(
+                platform_override, platform_override
+            )
+        else:
+            platform_value = _field("platform", 0)
         return emu.UserAgentMetadata(
             platform=platform_value,
             platform_version=_field("platformVersion", 1),
@@ -747,6 +767,14 @@ class Stealth:
                 "Object.defineProperty(p,'hardwareConcurrency',{get:function(){return %s;},configurable:true});"
                 % json.dumps(int(fp.hardware_concurrency))
             )
+        # platform: CDP Emulation.setUserAgentOverride(platform=...) only
+        # reaches Navigator::platform() (main document); WorkerNavigator
+        # inherits NavigatorBase::platform() which reads the real host OS.
+        if fp.platform:
+            lines.append(
+                "Object.defineProperty(p,'platform',{get:function(){return %s;},configurable:true});"
+                % json.dumps(fp.platform)
+            )
         nav_block = (
             "try{var p=Object.getPrototypeOf(navigator);" + "".join(lines) + "}catch(e){}"
             if lines
@@ -866,6 +894,17 @@ class Stealth:
             blocks.append(
                 "try{Object.defineProperty(navigator,'deviceMemory',"
                 f"{{get:()=>{json.dumps(fp.device_memory)},configurable:true}});}}catch(e){{}}"
+            )
+        # Belt-and-suspenders for navigator.platform: the CDP platform param
+        # on Emulation.setUserAgentOverride handles most environments, but on
+        # some Chromium builds (e.g. snap on Ubuntu) it silently fails while
+        # the userAgentMetadata path still works.  A prototype-level JS
+        # override catches that gap and is harmless when CDP already succeeded
+        # (the value is identical).
+        if fp.platform:
+            blocks.append(
+                "try{Object.defineProperty(Object.getPrototypeOf(navigator),'platform',"
+                f"{{get:()=>{json.dumps(fp.platform)},configurable:true}});}}catch(e){{}}"
             )
         if wants_webgl:
             blocks.append(self._webgl_patch_js(fp))
