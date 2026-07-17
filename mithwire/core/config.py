@@ -122,6 +122,7 @@ class Config:
         else:
             self.fingerprint = FingerprintConfig.from_dict(fingerprint)
         self.webrtc_leak_protection = webrtc_leak_protection
+        self.engine = kwargs.pop("engine", "stock")
 
         # other keyword args will be accessible by attribute
         self.__dict__.update(kwargs)

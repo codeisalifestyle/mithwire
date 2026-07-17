@@ -54,6 +54,7 @@ class Stealth:
         webrtc_leak_protection: str = "auto",
         headless: bool = False,
         proxied: bool = False,
+        engine: str = "stock",
     ) -> None:
         self.browser = browser
         self.fingerprint = fingerprint or FingerprintConfig()
@@ -65,13 +66,39 @@ class Stealth:
         self.webrtc_leak_protection = (webrtc_leak_protection or "auto").strip().lower()
         self.headless = headless
         self.proxied = proxied
+        # Engine mode: "stock" (default) uses full CDP/JS overrides; "stealth"
+        # means a CloakBrowser binary with C++ patches is running, so JS/CDP
+        # fingerprint overrides are skipped (the binary handles them natively).
+        # Only CDP timezone/locale/geolocation remain active in stealth mode.
+        self.engine = (engine or "stock").strip().lower()
         self.timezone_id: str | None = None
         self.tab: Any = getattr(browser, "main_tab", None)
         self._page_domain_tab: Any | None = None
 
+    @property
+    def is_stealth_engine(self) -> bool:
+        """True when a CloakBrowser binary handles fingerprinting natively."""
+        return self.engine == "stealth"
+
     async def apply_all(self) -> None:
-        """Run the launch-time stealth sequence on the active tab."""
+        """Run the launch-time stealth sequence on the active tab.
+
+        When ``engine=stealth`` (CloakBrowser binary), the binary handles
+        fingerprint surfaces (UA, platform, WebGL, canvas, audio, plugins,
+        WebRTC, screen dimensions, hardware) at the C++ level. We skip the
+        JS injections and CDP overrides that would conflict, but keep:
+        - CDP timezone override (Emulation.setTimezoneOverride)
+        - CDP locale override (Emulation.setLocaleOverride)
+        - CDP geolocation override (Emulation.setGeolocationOverride)
+        These are pure CDP commands that complement (not conflict with)
+        the binary's patches.
+        """
         self.tab = getattr(self.browser, "main_tab", None)
+        if self.is_stealth_engine:
+            logger.info("Stealth engine active — skipping JS/CDP fingerprint overrides.")
+            if not self.fingerprint.is_empty:
+                await self._apply_fingerprint_stealth_mode(self.fingerprint)
+            return
         await self._inject_stealth_script()
         await self._inject_webrtc_protection()
         if self.headless:
@@ -589,6 +616,71 @@ class Stealth:
             bitness=_field("bitness", 3),
         )
 
+    async def _apply_fingerprint_stealth_mode(self, fp: FingerprintConfig) -> dict[str, Any]:
+        """Apply only the CDP overrides that complement CloakBrowser's patches.
+
+        CloakBrowser handles UA, platform, WebGL, canvas, audio, plugins,
+        hardware concurrency, device memory, screen dimensions, and WebRTC at
+        the C++ level. We only apply:
+        - Timezone (CloakBrowser's --fingerprint-timezone is CLI-only; CDP
+          lets us change it at runtime for proxy rotation)
+        - Locale
+        - Geolocation + permission grant
+        - Accept-Language (CDP-level, complements CloakBrowser)
+        """
+        if self.tab is None:
+            raise RuntimeError("Browser not started")
+        emu = cdp_emulation
+        applied: dict[str, Any] = {}
+
+        if fp.timezone_id:
+            try:
+                await self.tab.send(emu.set_timezone_override(timezone_id=fp.timezone_id))
+                self.timezone_id = fp.timezone_id
+                applied["timezone_id"] = fp.timezone_id
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("setTimezoneOverride(%s) failed: %s", fp.timezone_id, exc)
+
+        if fp.locale:
+            try:
+                await self.tab.send(emu.set_locale_override(locale=fp.locale))
+                applied["locale"] = fp.locale
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("setLocaleOverride(%s) failed: %s", fp.locale, exc)
+
+        accept_language = fp.effective_accept_language
+        if accept_language:
+            try:
+                current_ua = await self.tab.evaluate("navigator.userAgent")
+                ua_string = current_ua if isinstance(current_ua, str) else ""
+                await self.tab.send(
+                    emu.set_user_agent_override(
+                        user_agent=ua_string,
+                        accept_language=accept_language,
+                    )
+                )
+                applied["accept_language"] = accept_language
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("setUserAgentOverride (accept_language) failed: %s", exc)
+
+        if fp.latitude is not None and fp.longitude is not None:
+            try:
+                await self.tab.send(
+                    emu.set_geolocation_override(
+                        latitude=fp.latitude,
+                        longitude=fp.longitude,
+                        accuracy=fp.geo_accuracy if fp.geo_accuracy is not None else 50.0,
+                    )
+                )
+                await self._grant_geolocation_permission()
+                applied["geolocation"] = {"latitude": fp.latitude, "longitude": fp.longitude}
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("setGeolocationOverride failed: %s", exc)
+
+        self.fingerprint = self.fingerprint.merged_with(fp)
+        logger.info("Stealth-mode fingerprint overrides: %s", sorted(applied))
+        return applied
+
     async def apply_fingerprint(self, fp: FingerprintConfig) -> dict[str, Any]:
         """Apply an identity to the live session, engine-level where possible.
 
@@ -599,7 +691,12 @@ class Stealth:
         optional WebGL strings — which have no CDP override — are injected as
         new-document JS (and eval'd once on the current document for immediate
         effect).
+
+        When ``engine=stealth``, delegates to ``_apply_fingerprint_stealth_mode``
+        which only applies the CDP overrides that complement CloakBrowser.
         """
+        if self.is_stealth_engine:
+            return await self._apply_fingerprint_stealth_mode(fp)
         if self.tab is None:
             raise RuntimeError("Browser not started")
         emu = cdp_emulation
