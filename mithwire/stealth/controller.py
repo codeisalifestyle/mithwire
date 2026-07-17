@@ -31,7 +31,6 @@ from typing import Any, ClassVar
 
 from ..cdp import browser as cdp_browser
 from ..cdp import emulation as cdp_emulation
-from ..cdp import network as cdp_network
 from ..cdp import page as cdp_page
 from .fingerprint import FingerprintConfig
 
@@ -349,7 +348,7 @@ class Stealth:
                 return
             try:
                 await self.tab.send(
-                    cdp_network.set_user_agent_override(user_agent=clean_ua)
+                    cdp_emulation.set_user_agent_override(user_agent=clean_ua)
                 )
             except Exception as exc:
                 logger.warning("Could not override headless user-agent: %s", exc)
@@ -357,22 +356,13 @@ class Stealth:
 
         try:
             await self.tab.send(
-                cdp_network.set_user_agent_override(
+                cdp_emulation.set_user_agent_override(
                     user_agent=clean_ua, user_agent_metadata=metadata
                 )
             )
         except Exception as exc:
             logger.warning("Could not override headless user-agent: %s", exc)
             return
-
-        if ua_changed:
-            try:
-                await self.add_script_on_new_document(
-                    "Object.defineProperty(navigator, 'userAgent', "
-                    f"{{get: () => {json.dumps(clean_ua)}, configurable: true}});"
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("Could not inject UA new-document script: %s", exc)
         logger.info(
             "Applied headless UA-CH metadata (brands populated; UA %s).",
             "rewritten" if ua_changed else "unchanged",
@@ -548,6 +538,29 @@ class Stealth:
         # Fall back to a synthesized set so a custom UA never blanks UA-CH.
         if not brands and versions:
             brands, full_version_list = self._synthesize_brands(versions[0], versions[1])
+
+        # Unbranded Chromium (Debian/Ubuntu packages, Docker images) reports
+        # only "Chromium" in its UA-CH brands while the UA string says
+        # "Chrome/..." -- real Google Chrome always includes both brands.
+        # Inject the missing brand so the two signals agree.
+        def _inject_chrome(brand_list: list[Any]) -> None:
+            chrome_found = False
+            chromium_ver: str | None = None
+            for b in brand_list:
+                name = getattr(b, "brand", "")
+                if name == "Google Chrome":
+                    chrome_found = True
+                    break
+                if name == "Chromium":
+                    chromium_ver = getattr(b, "version", "")
+            if not chrome_found and chromium_ver is not None:
+                brand_list.append(
+                    emu.UserAgentBrandVersion(brand="Google Chrome", version=chromium_ver)
+                )
+
+        _inject_chrome(brands)
+        _inject_chrome(full_version_list)
+
         # Infer host fields when the live hints are unavailable (about:blank).
         inferred = (
             self._infer_platform_hints(ua_string) if not hints.get("platform") else None
