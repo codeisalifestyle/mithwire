@@ -113,6 +113,10 @@ def compute_launch_args(
       ``HINTING_FULL`` which produces different glyph metrics from headed
       mode (``HINTING_MEDIUM``), reducing CSS-based font detection to a
       fraction of headed-mode results.
+    * ``--force-effective-connection-type=4G`` — headless Chrome and
+      server environments often report ``navigator.connection.rtt === 0``
+      because the Network Quality Estimator cannot measure real latency.
+      Forcing 4G yields plausible values (rtt ~50-150 ms, downlink ~1.5 Mbps).
     * ``--window-position`` — on Windows, headless Chrome 129+ can still
       spawn a blank overlay window; off-screen placement hides it.
 
@@ -157,6 +161,9 @@ def compute_launch_args(
 
         if not any("font-render-hinting" in arg for arg in existing):
             extra.append("--font-render-hinting=medium")
+
+        if not any("force-effective-connection-type" in arg for arg in existing):
+            extra.append("--force-effective-connection-type=4G")
 
     if not any("use-fake-device" in arg for arg in existing):
         extra.append("--use-fake-device-for-media-stream")
