@@ -319,69 +319,23 @@ class Stealth:
         )
 
     async def _inject_environment_spoofs(self) -> None:
-        """Auto-fix the WebGL SwiftShader tell for stock mode on GPU-less servers.
+        """Placeholder for environment-level stealth adjustments.
 
-        SwiftShader is Chrome's CPU-only WebGL renderer, used exclusively on
-        servers and CI environments. It is a well-known headless tell that
-        Sannysoft and other detectors flag. When detected, the getParameter
-        return for UNMASKED_VENDOR/RENDERER is replaced with a plausible
-        desktop GPU string.
-
-        Other headless micro-signals (media devices, speech voices, notification
+        Headless micro-signals (speech voices, media devices, notification
         permissions) are NOT spoofed via JS: imperfect JS spoofs introduce
-        prototype-chain inconsistencies that CreepJS detects as lies, making
-        the headless score worse. Instead, these should be fixed at the system
-        level (PulseAudio for audio devices, speech-dispatcher for voices).
-        """
-        await self._ensure_page_domain()
+        prototype-chain inconsistencies that CreepJS detects, worsening the
+        headless score vs no spoof at all. Instead:
 
-        script = r"""
-        (function() {
-          if (self.__nrEnvSpoofed) return;
-          try { Object.defineProperty(self, '__nrEnvSpoofed', {value:true}); } catch(e) {}
-
-          // ── WebGL SwiftShader Auto-fix ──
-          try {
-            if (typeof document !== 'undefined') {
-              var c = document.createElement('canvas');
-              var gl = c.getContext('webgl');
-              if (gl) {
-                var ext = gl.getExtension('WEBGL_debug_renderer_info');
-                if (ext) {
-                  var rr = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) || '';
-                  if (rr.indexOf('SwiftShader') >= 0 || rr.indexOf('llvmpipe') >= 0) {
-                    var V = 'Google Inc. (Intel)';
-                    var R = 'ANGLE (Intel, Mesa Intel(R) UHD Graphics 630, OpenGL 4.6)';
-                    [WebGLRenderingContext,
-                     typeof WebGL2RenderingContext!=='undefined'?WebGL2RenderingContext:null
-                    ].filter(Boolean).forEach(function(C) {
-                      var p = C.prototype;
-                      if (p.__nrWG) return;
-                      var orig = p.getParameter;
-                      p.getParameter = function getParameter(parm) {
-                        if (parm === 37445) return V;
-                        if (parm === 37446) return R;
-                        return orig.apply(this, arguments);
-                      };
-                      try { Object.defineProperty(p.getParameter, 'toString', {
-                        value: function(){ return 'function getParameter() { [native code] }'; }
-                      }); } catch(e){}
-                      try { Object.defineProperty(p, '__nrWG', {value:true}); } catch(e){}
-                    });
-                  }
-                }
-              }
-            }
-          } catch(e) {}
-        })();
+        - Media devices: ``--use-fake-device-for-media-stream`` launch flag
+          provides native Chrome MediaDeviceInfo objects (see __init__.py).
+        - Speech voices: requires system-level speech-dispatcher installation.
+        - WebGL SwiftShader: accepted limitation of stock mode on GPU-less
+          servers. The stealth engine (CloakBrowser) handles WebGL at the
+          binary level. Users can also set ``webgl_vendor``/``webgl_renderer``
+          in FingerprintConfig for explicit overrides (accepted tradeoff:
+          anti-detect systems may flag the override).
         """
-        try:
-            await self.tab.send(
-                cdp_page.add_script_to_evaluate_on_new_document(source=script)
-            )
-            logger.info("Registered WebGL SwiftShader auto-fix for new documents.")
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Could not inject WebGL auto-fix: %s", exc)
+        pass
 
     async def _apply_headless_user_agent(self) -> None:
         """Strip ``HeadlessChrome`` while keeping main-thread UA-CH populated.
