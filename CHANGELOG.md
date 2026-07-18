@@ -5,6 +5,31 @@ automatically by [release-please](https://github.com/googleapis/release-please);
 entries below are generated from [Conventional Commit](https://www.conventionalcommits.org/)
 messages. Do not edit released sections by hand.
 
+## [0.50.9](https://github.com/codeisalifestyle/mithwire/compare/v0.50.8...v0.50.9) (2026-07-18)
+
+
+### Features
+
+* add engine-aware stealth controller for CloakBrowser integration ([a7bac5d](https://github.com/codeisalifestyle/mithwire/commit/a7bac5d225b6e65e77192ef09e4f9ddb866a3cc2))
+* add environment spoofs for headless detection reduction ([7d01000](https://github.com/codeisalifestyle/mithwire/commit/7d010003b367764f099778128f4c77c5f1eae577))
+* auto-align navigator.userAgent OS token to match fp.platform ([ce240c3](https://github.com/codeisalifestyle/mithwire/commit/ce240c3c3a6bf1ed5f64dccddda26056c7dc5420))
+* auto-align navigator.userAgent OS token to match fp.platform ([0a650f6](https://github.com/codeisalifestyle/mithwire/commit/0a650f671df156fecb4dd9aec6f2feab9402c20a))
+
+
+### Bug Fixes
+
+* headless launch flags — window/screen mismatch, Worker UA leak, font hinting ([1fbfd39](https://github.com/codeisalifestyle/mithwire/commit/1fbfd397de63c358b4b9570e20dd2d8f27895e4b))
+* simulate browser chrome in viewport metrics for headless detection evasion ([8986749](https://github.com/codeisalifestyle/mithwire/commit/8986749c67acde573eaa1a871e594ed547b1edce))
+* **stealth:** universal navigator.platform spoofing across all contexts ([f2688ac](https://github.com/codeisalifestyle/mithwire/commit/f2688ac73dd20b625e0d4d4ee1f2f6f1d76fcf35))
+* **stealth:** universal navigator.platform spoofing across all contexts ([60e05d5](https://github.com/codeisalifestyle/mithwire/commit/60e05d53b63207bccf11061af6b1d2f5c36b654b))
+* use Emulation domain for headless UA cleanup (not Network) ([94dce9b](https://github.com/codeisalifestyle/mithwire/commit/94dce9b4b8fa7bf5c8364c7dd1950c0c8e8b67ea))
+* use Emulation domain for headless UA cleanup + inject Chrome brand ([c403b0e](https://github.com/codeisalifestyle/mithwire/commit/c403b0ee6323f6540d515bf00125fccc73a1ebca))
+
+
+### Refactors
+
+* remove auto WebGL spoof — isAntiDetect tradeoff is net negative ([00394c6](https://github.com/codeisalifestyle/mithwire/commit/00394c62cc597de9b1772caa35ca2043f26b4ed3))
+
 ## [0.50.8](https://github.com/codeisalifestyle/mithwire/compare/v0.50.7...v0.50.8) (2026-07-14)
 
 
