@@ -90,4 +90,11 @@ def compute_launch_args(
         ):
             extra.append("--window-position=-2400,-2400")
 
+    # Provide native fake media devices (audioinput, videoinput, audiooutput)
+    # on headless/server environments where no real hardware exists. This is
+    # a Chrome built-in that creates proper MediaDeviceInfo objects, avoiding
+    # the 0-device tell that CreepJS and others flag as headless.
+    if not any("use-fake-device" in arg for arg in existing):
+        extra.append("--use-fake-device-for-media-stream")
+
     return extra
