@@ -797,25 +797,34 @@ class Stealth:
 
         if fp.has_device_metrics:
             try:
+                dpr = float(fp.device_scale_factor or 1.0)
+                sw = int(fp.screen_width)
+                sh = int(fp.screen_height)
+                # A real desktop browser always has outerHeight > innerHeight
+                # (address bar, tabs, etc.). Fingerprinters flag toolbar == 0
+                # as headless. In headless mode we simulate a plausible chrome
+                # height; in headed (Xvfb) mode the real window geometry does
+                # this naturally, so we just set screen dims + DPR.
+                chrome_h = 85 + int(dpr * 10)  # 85-100 px, realistic range
+                vw = sw
+                vh = max(sh - chrome_h, sh // 2) if self.headless else 0
                 await self.tab.send(
                     emu.set_device_metrics_override(
-                        width=int(fp.screen_width),
-                        height=int(fp.screen_height),
-                        device_scale_factor=float(fp.device_scale_factor or 1.0),
+                        width=vw,
+                        height=vh,
+                        device_scale_factor=dpr,
                         mobile=bool(fp.mobile),
-                        # Without screen_width/height, only the viewport
-                        # (innerWidth/innerHeight) changes while screen.width/
-                        # height keep the host values -> innerWidth can exceed
-                        # screen.width, an impossible, easily-flagged state.
-                        screen_width=int(fp.screen_width),
-                        screen_height=int(fp.screen_height),
+                        screen_width=sw,
+                        screen_height=sh,
+                        dont_set_visible_size=not self.headless,
                     )
                 )
                 applied["device_metrics"] = {
-                    "width": int(fp.screen_width),
-                    "height": int(fp.screen_height),
-                    "device_scale_factor": float(fp.device_scale_factor or 1.0),
+                    "width": sw,
+                    "height": sh,
+                    "device_scale_factor": dpr,
                     "mobile": bool(fp.mobile),
+                    "headed_natural_viewport": not self.headless,
                 }
             except Exception as exc:  # noqa: BLE001
                 logger.warning("setDeviceMetricsOverride failed: %s", exc)
