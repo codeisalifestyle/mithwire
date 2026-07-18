@@ -54,6 +54,7 @@ class Stealth:
         webrtc_leak_protection: str = "auto",
         headless: bool = False,
         proxied: bool = False,
+        engine: str = "stock",
     ) -> None:
         self.browser = browser
         self.fingerprint = fingerprint or FingerprintConfig()
@@ -65,15 +66,42 @@ class Stealth:
         self.webrtc_leak_protection = (webrtc_leak_protection or "auto").strip().lower()
         self.headless = headless
         self.proxied = proxied
+        # Engine mode: "stock" (default) uses full CDP/JS overrides; "stealth"
+        # means a CloakBrowser binary with C++ patches is running, so JS/CDP
+        # fingerprint overrides are skipped (the binary handles them natively).
+        # Only CDP timezone/locale/geolocation remain active in stealth mode.
+        self.engine = (engine or "stock").strip().lower()
         self.timezone_id: str | None = None
         self.tab: Any = getattr(browser, "main_tab", None)
         self._page_domain_tab: Any | None = None
 
+    @property
+    def is_stealth_engine(self) -> bool:
+        """True when a CloakBrowser binary handles fingerprinting natively."""
+        return self.engine == "stealth"
+
     async def apply_all(self) -> None:
-        """Run the launch-time stealth sequence on the active tab."""
+        """Run the launch-time stealth sequence on the active tab.
+
+        When ``engine=stealth`` (CloakBrowser binary), the binary handles
+        fingerprint surfaces (UA, platform, WebGL, canvas, audio, plugins,
+        WebRTC, screen dimensions, hardware) at the C++ level. We skip the
+        JS injections and CDP overrides that would conflict, but keep:
+        - CDP timezone override (Emulation.setTimezoneOverride)
+        - CDP locale override (Emulation.setLocaleOverride)
+        - CDP geolocation override (Emulation.setGeolocationOverride)
+        These are pure CDP commands that complement (not conflict with)
+        the binary's patches.
+        """
         self.tab = getattr(self.browser, "main_tab", None)
+        if self.is_stealth_engine:
+            logger.info("Stealth engine active — skipping JS/CDP fingerprint overrides.")
+            if not self.fingerprint.is_empty:
+                await self._apply_fingerprint_stealth_mode(self.fingerprint)
+            return
         await self._inject_stealth_script()
         await self._inject_webrtc_protection()
+        await self._inject_environment_spoofs()
         if self.headless:
             await self._apply_headless_user_agent()
         if not self.fingerprint.is_empty:
@@ -289,6 +317,25 @@ class Stealth:
             })();
             """
         )
+
+    async def _inject_environment_spoofs(self) -> None:
+        """Placeholder for environment-level stealth adjustments.
+
+        Headless micro-signals (speech voices, media devices, notification
+        permissions) are NOT spoofed via JS: imperfect JS spoofs introduce
+        prototype-chain inconsistencies that CreepJS detects, worsening the
+        headless score vs no spoof at all. Instead:
+
+        - Media devices: ``--use-fake-device-for-media-stream`` launch flag
+          provides native Chrome MediaDeviceInfo objects (see __init__.py).
+        - Speech voices: requires system-level speech-dispatcher installation.
+        - WebGL SwiftShader: accepted limitation of stock mode on GPU-less
+          servers. The stealth engine (CloakBrowser) handles WebGL at the
+          binary level. Users can also set ``webgl_vendor``/``webgl_renderer``
+          in FingerprintConfig for explicit overrides (accepted tradeoff:
+          anti-detect systems may flag the override).
+        """
+        pass
 
     async def _apply_headless_user_agent(self) -> None:
         """Strip ``HeadlessChrome`` while keeping main-thread UA-CH populated.
@@ -589,6 +636,71 @@ class Stealth:
             bitness=_field("bitness", 3),
         )
 
+    async def _apply_fingerprint_stealth_mode(self, fp: FingerprintConfig) -> dict[str, Any]:
+        """Apply only the CDP overrides that complement CloakBrowser's patches.
+
+        CloakBrowser handles UA, platform, WebGL, canvas, audio, plugins,
+        hardware concurrency, device memory, screen dimensions, and WebRTC at
+        the C++ level. We only apply:
+        - Timezone (CloakBrowser's --fingerprint-timezone is CLI-only; CDP
+          lets us change it at runtime for proxy rotation)
+        - Locale
+        - Geolocation + permission grant
+        - Accept-Language (CDP-level, complements CloakBrowser)
+        """
+        if self.tab is None:
+            raise RuntimeError("Browser not started")
+        emu = cdp_emulation
+        applied: dict[str, Any] = {}
+
+        if fp.timezone_id:
+            try:
+                await self.tab.send(emu.set_timezone_override(timezone_id=fp.timezone_id))
+                self.timezone_id = fp.timezone_id
+                applied["timezone_id"] = fp.timezone_id
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("setTimezoneOverride(%s) failed: %s", fp.timezone_id, exc)
+
+        if fp.locale:
+            try:
+                await self.tab.send(emu.set_locale_override(locale=fp.locale))
+                applied["locale"] = fp.locale
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("setLocaleOverride(%s) failed: %s", fp.locale, exc)
+
+        accept_language = fp.effective_accept_language
+        if accept_language:
+            try:
+                current_ua = await self.tab.evaluate("navigator.userAgent")
+                ua_string = current_ua if isinstance(current_ua, str) else ""
+                await self.tab.send(
+                    emu.set_user_agent_override(
+                        user_agent=ua_string,
+                        accept_language=accept_language,
+                    )
+                )
+                applied["accept_language"] = accept_language
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("setUserAgentOverride (accept_language) failed: %s", exc)
+
+        if fp.latitude is not None and fp.longitude is not None:
+            try:
+                await self.tab.send(
+                    emu.set_geolocation_override(
+                        latitude=fp.latitude,
+                        longitude=fp.longitude,
+                        accuracy=fp.geo_accuracy if fp.geo_accuracy is not None else 50.0,
+                    )
+                )
+                await self._grant_geolocation_permission()
+                applied["geolocation"] = {"latitude": fp.latitude, "longitude": fp.longitude}
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("setGeolocationOverride failed: %s", exc)
+
+        self.fingerprint = self.fingerprint.merged_with(fp)
+        logger.info("Stealth-mode fingerprint overrides: %s", sorted(applied))
+        return applied
+
     async def apply_fingerprint(self, fp: FingerprintConfig) -> dict[str, Any]:
         """Apply an identity to the live session, engine-level where possible.
 
@@ -599,7 +711,12 @@ class Stealth:
         optional WebGL strings — which have no CDP override — are injected as
         new-document JS (and eval'd once on the current document for immediate
         effect).
+
+        When ``engine=stealth``, delegates to ``_apply_fingerprint_stealth_mode``
+        which only applies the CDP overrides that complement CloakBrowser.
         """
+        if self.is_stealth_engine:
+            return await self._apply_fingerprint_stealth_mode(fp)
         if self.tab is None:
             raise RuntimeError("Browser not started")
         emu = cdp_emulation
@@ -700,25 +817,34 @@ class Stealth:
 
         if fp.has_device_metrics:
             try:
+                dpr = float(fp.device_scale_factor or 1.0)
+                sw = int(fp.screen_width)
+                sh = int(fp.screen_height)
+                # A real desktop browser always has outerHeight > innerHeight
+                # (address bar, tabs, etc.). Fingerprinters flag toolbar == 0
+                # as headless. In headless mode we simulate a plausible chrome
+                # height; in headed (Xvfb) mode the real window geometry does
+                # this naturally, so we just set screen dims + DPR.
+                chrome_h = 85 + int(dpr * 10)  # 85-100 px, realistic range
+                vw = sw
+                vh = max(sh - chrome_h, sh // 2) if self.headless else 0
                 await self.tab.send(
                     emu.set_device_metrics_override(
-                        width=int(fp.screen_width),
-                        height=int(fp.screen_height),
-                        device_scale_factor=float(fp.device_scale_factor or 1.0),
+                        width=vw,
+                        height=vh,
+                        device_scale_factor=dpr,
                         mobile=bool(fp.mobile),
-                        # Without screen_width/height, only the viewport
-                        # (innerWidth/innerHeight) changes while screen.width/
-                        # height keep the host values -> innerWidth can exceed
-                        # screen.width, an impossible, easily-flagged state.
-                        screen_width=int(fp.screen_width),
-                        screen_height=int(fp.screen_height),
+                        screen_width=sw,
+                        screen_height=sh,
+                        dont_set_visible_size=not self.headless,
                     )
                 )
                 applied["device_metrics"] = {
-                    "width": int(fp.screen_width),
-                    "height": int(fp.screen_height),
-                    "device_scale_factor": float(fp.device_scale_factor or 1.0),
+                    "width": sw,
+                    "height": sh,
+                    "device_scale_factor": dpr,
                     "mobile": bool(fp.mobile),
+                    "headed_natural_viewport": not self.headless,
                 }
             except Exception as exc:  # noqa: BLE001
                 logger.warning("setDeviceMetricsOverride failed: %s", exc)

@@ -16,6 +16,8 @@ Public surface:
 
 from __future__ import annotations
 
+import logging
+import subprocess
 import sys
 
 from .controller import Stealth
@@ -35,34 +37,88 @@ __all__ = [
     "strip_q_values",
 ]
 
+logger = logging.getLogger(__name__)
+
+_PLATFORM_UA_TOKENS: dict[str, str] = {
+    "MacIntel": "Macintosh; Intel Mac OS X 10_15_7",
+    "Win32": "Windows NT 10.0; Win64; x64",
+    "Win64": "Windows NT 10.0; Win64; x64",
+    "Linux x86_64": "X11; Linux x86_64",
+    "Linux armv81": "Linux; Android 10; K",
+}
+
+
+def _detect_chrome_major(executable_path: str) -> str | None:
+    """Run the browser binary with --product-version and return the major."""
+    try:
+        result = subprocess.run(
+            [executable_path, "--product-version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        version = result.stdout.strip()
+        if version:
+            return version.split(".")[0]
+    except Exception:
+        pass
+    return None
+
+
+def _build_clean_ua(
+    *,
+    major: str,
+    fingerprint: "FingerprintConfig | None" = None,
+) -> str:
+    """Build a standard Chrome UA string without HeadlessChrome."""
+    if fingerprint and fingerprint.platform:
+        token = _PLATFORM_UA_TOKENS.get(fingerprint.platform)
+    else:
+        token = None
+    if not token:
+        if sys.platform == "darwin":
+            token = "Macintosh; Intel Mac OS X 10_15_7"
+        elif sys.platform.startswith("linux"):
+            token = "X11; Linux x86_64"
+        else:
+            token = "Windows NT 10.0; Win64; x64"
+    return (
+        f"Mozilla/5.0 ({token}) AppleWebKit/537.36 "
+        f"(KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36"
+    )
+
 
 def compute_launch_args(
     browser_args: list[str],
     *,
     fingerprint: "FingerprintConfig | None" = None,
     headless: bool = False,
+    browser_executable_path: str | None = None,
 ) -> list[str]:
     """Return the stealth launch flags to append, given the existing args.
 
     These flags MUST be applied at launch (they cannot be retrofitted via CDP
     on an already-spawned process without leaking):
 
-    * ``--force-webrtc-ip-handling-policy`` — pinned per proxy presence. A proxy
-      (detected by the presence of ``--proxy-server=`` in ``browser_args``)
-      forces ``disable_non_proxied_udp`` so WebRTC can never reveal the real
-      egress IP behind the proxy; a direct connection uses
-      ``default_public_interface_only`` (its public IP is the legitimate one,
-      but private/LAN IPs stay hidden).
-    * ``--lang`` — Chromium applies it itself, so it propagates to
-      ``navigator.language(s)``, the ``Accept-Language`` header, and Web Workers
-      consistently. A runtime CDP override cannot rewrite ``navigator.languages``
-      in already-spawned workers, so the launch flag is the only leak-free way.
-    * ``--window-size`` — headless Chrome otherwise reports a default-ish screen
-      that, combined with device-metric overrides, can produce impossible
-      viewport/screen combinations.
-    * ``--window-position`` — on Windows, headless Chrome 129+ can still spawn a
-      blank overlay window; moving it off-screen hides the artifact without
-      affecting automation.
+    * ``--force-webrtc-ip-handling-policy`` — pinned per proxy presence.
+    * ``--lang`` — propagates to workers (CDP cannot).
+    * ``--window-size`` — matched to the fingerprint's screen dimensions so
+      ``innerWidth/Height`` never exceeds ``outerWidth/Height``.
+    * ``--user-agent`` — in headless mode, replaces the default
+      ``HeadlessChrome/...`` UA at the binary level. CDP
+      ``Emulation.setUserAgentOverride`` only reaches the main thread;
+      Workers inherit the launch-time UA and would otherwise expose
+      ``HeadlessChrome`` to any cross-scope consistency check (CreepJS).
+    * ``--font-render-hinting=medium`` — headless Chrome defaults to
+      ``HINTING_FULL`` which produces different glyph metrics from headed
+      mode (``HINTING_MEDIUM``), reducing CSS-based font detection to a
+      fraction of headed-mode results.
+    * ``--force-effective-connection-type=4G`` — headless Chrome and
+      server environments often report ``navigator.connection.rtt === 0``
+      because the Network Quality Estimator cannot measure real latency.
+      Forcing 4G yields plausible values (rtt ~50-150 ms, downlink ~1.5 Mbps).
+    * ``--window-position`` — on Windows, headless Chrome 129+ can still
+      spawn a blank overlay window; off-screen placement hides it.
 
     Existing flags are never duplicated.
     """
@@ -81,13 +137,35 @@ def compute_launch_args(
 
     if headless:
         if not any(arg.startswith("--window-size=") for arg in existing):
-            extra.append("--window-size=1920,1080")
-        # Chrome 129+ on Windows shows a blank headless window on top of the
-        # desktop. Off-screen placement is the community workaround until
-        # Chromium fully suppresses the platform window in unified headless.
+            w = int(fingerprint.screen_width) if fingerprint and fingerprint.screen_width else 1920
+            h = int(fingerprint.screen_height) if fingerprint and fingerprint.screen_height else 1080
+            extra.append(f"--window-size={w},{h}")
+
         if sys.platform == "win32" and not any(
             arg.startswith("--window-position=") for arg in existing
         ):
             extra.append("--window-position=-2400,-2400")
+
+        if not any(arg.startswith("--user-agent=") for arg in existing):
+            major = (
+                _detect_chrome_major(browser_executable_path)
+                if browser_executable_path
+                else None
+            )
+            if major:
+                ua = _build_clean_ua(major=major, fingerprint=fingerprint)
+                extra.append(f"--user-agent={ua}")
+                logger.info(
+                    "Headless UA launch flag: Chrome/%s (propagates to Workers)", major
+                )
+
+        if not any("font-render-hinting" in arg for arg in existing):
+            extra.append("--font-render-hinting=medium")
+
+        if not any("force-effective-connection-type" in arg for arg in existing):
+            extra.append("--force-effective-connection-type=4G")
+
+    if not any("use-fake-device" in arg for arg in existing):
+        extra.append("--use-fake-device-for-media-stream")
 
     return extra

@@ -122,6 +122,7 @@ class Config:
         else:
             self.fingerprint = FingerprintConfig.from_dict(fingerprint)
         self.webrtc_leak_protection = webrtc_leak_protection
+        self.engine = kwargs.pop("engine", "stock")
 
         # other keyword args will be accessible by attribute
         self.__dict__.update(kwargs)
@@ -149,6 +150,7 @@ class Config:
             self._browser_args,
             fingerprint=self.fingerprint,
             headless=self.headless,
+            browser_executable_path=self.browser_executable_path,
         ):
             if arg not in self._browser_args:
                 self._browser_args.append(arg)
