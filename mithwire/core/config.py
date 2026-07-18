@@ -150,6 +150,7 @@ class Config:
             self._browser_args,
             fingerprint=self.fingerprint,
             headless=self.headless,
+            browser_executable_path=self.browser_executable_path,
         ):
             if arg not in self._browser_args:
                 self._browser_args.append(arg)
