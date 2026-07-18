@@ -5,6 +5,26 @@ automatically by [release-please](https://github.com/googleapis/release-please);
 entries below are generated from [Conventional Commit](https://www.conventionalcommits.org/)
 messages. Do not edit released sections by hand.
 
+## [0.51.0](https://github.com/codeisalifestyle/mithwire/compare/v0.50.8...v0.51.0) (2026-07-19)
+
+
+### Features
+
+* **stealth:** dual-mode stealth engine — stock (CDP-only) and stealth (CloakBrowser binary) ([a7bac5d](https://github.com/codeisalifestyle/mithwire/commit/a7bac5d))
+* **stealth:** add environment spoofs for headless detection reduction (media devices, battery, speech voices) ([7d01000](https://github.com/codeisalifestyle/mithwire/commit/7d01000))
+
+
+### Bug Fixes
+
+* **stealth:** force 4G effective connection type in headless mode to fix connectionRTT detection ([a71b841](https://github.com/codeisalifestyle/mithwire/commit/a71b841))
+* **stealth:** headless launch flags — window/screen mismatch, Worker UA leak, font hinting ([1fbfd39](https://github.com/codeisalifestyle/mithwire/commit/1fbfd39))
+* **stealth:** simulate browser chrome in viewport metrics for headless detection evasion ([8986749](https://github.com/codeisalifestyle/mithwire/commit/8986749))
+
+
+### Refactors
+
+* **stealth:** remove auto WebGL spoof — isAntiDetect tradeoff is net negative ([00394c6](https://github.com/codeisalifestyle/mithwire/commit/00394c6))
+
 ## [0.50.8](https://github.com/codeisalifestyle/mithwire/compare/v0.50.7...v0.50.8) (2026-07-14)
 
 
