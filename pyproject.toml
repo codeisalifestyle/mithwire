@@ -4,7 +4,7 @@ name = "mithwire" # Required
 
 version = "0.51.0"  # Required
 
-description = "Stealth browser automation framework that talks directly to Chrome via CDP (no webdriver, no chromedriver). A maintained fork of nodriver."
+description = "Dual-mode anti-detect browser framework — CDP-native stealth for local machines, binary-level patching for production servers. No WebDriver, no chromedriver."
 readme = {file = "README.md", content-type = "text/markdown"} # Optional
 requires-python = ">=3.10"
 license = {file = "LICENSE.txt"}
