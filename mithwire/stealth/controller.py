@@ -671,17 +671,18 @@ class Stealth:
         accept_language = fp.effective_accept_language
         if accept_language:
             try:
-                current_ua = await self.tab.evaluate("navigator.userAgent")
-                ua_string = current_ua if isinstance(current_ua, str) else ""
+                from ..cdp import network as cdp_network
+
                 await self.tab.send(
-                    emu.set_user_agent_override(
-                        user_agent=ua_string,
-                        accept_language=accept_language,
+                    cdp_network.set_extra_http_headers(
+                        headers=cdp_network.Headers(
+                            {"Accept-Language": accept_language}
+                        )
                     )
                 )
                 applied["accept_language"] = accept_language
             except Exception as exc:  # noqa: BLE001
-                logger.warning("setUserAgentOverride (accept_language) failed: %s", exc)
+                logger.warning("Network.setExtraHTTPHeaders (accept_language) failed: %s", exc)
 
         if fp.latitude is not None and fp.longitude is not None:
             try:

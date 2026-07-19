@@ -82,6 +82,34 @@ class ComputeLaunchArgsTests(unittest.TestCase):
         self.assertFalse(any(a.startswith("--user-agent=") for a in args))
         self.assertFalse(any("font-render-hinting" in a for a in args))
 
+    def test_stealth_skips_ua_window_lang_font(self) -> None:
+        fp = FingerprintConfig.from_dict(
+            {"languages": ["de-DE"], "screen_width": 2560, "screen_height": 1440}
+        )
+        args = compute_launch_args(
+            [], headless=True, fingerprint=fp, engine="stealth",
+        )
+        self.assertFalse(any(a.startswith("--user-agent=") for a in args))
+        self.assertFalse(any(a.startswith("--window-size=") for a in args))
+        self.assertFalse(any(a.startswith("--lang=") for a in args))
+        self.assertFalse(any("font-render-hinting" in a for a in args))
+
+    def test_stealth_keeps_webrtc_and_connection_type(self) -> None:
+        args = compute_launch_args(
+            [], headless=True, engine="stealth",
+        )
+        self.assertTrue(any("webrtc-ip-handling-policy" in a for a in args))
+        self.assertIn("--force-effective-connection-type=4G", args)
+        self.assertIn("--use-fake-device-for-media-stream", args)
+
+    def test_stealth_proxied_webrtc_policy(self) -> None:
+        args = compute_launch_args(
+            ["--proxy-server=http://127.0.0.1:8080"], engine="stealth",
+        )
+        self.assertIn(
+            "--force-webrtc-ip-handling-policy=disable_non_proxied_udp", args
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -94,73 +94,79 @@ def compute_launch_args(
     fingerprint: "FingerprintConfig | None" = None,
     headless: bool = False,
     browser_executable_path: str | None = None,
+    engine: str = "stock",
 ) -> list[str]:
     """Return the stealth launch flags to append, given the existing args.
 
-    These flags MUST be applied at launch (they cannot be retrofitted via CDP
-    on an already-spawned process without leaking):
+    When ``engine='stealth'`` (CloakBrowser), the binary generates a
+    complete, internally consistent fingerprint from its ``--fingerprint``
+    seed — including UA, screen metrics, language, and font rendering.
+    Injecting overlapping flags from here would create a mismatch between
+    the main thread (which sees our flag) and Worker threads (which see
+    the binary's native value), triggering ``hasInconsistentWorkerValues``
+    on detection sites.  In stealth mode we therefore only emit flags that
+    CloakBrowser does **not** handle natively:
+
+    * ``--force-webrtc-ip-handling-policy``
+    * ``--force-effective-connection-type=4G``
+    * ``--use-fake-device-for-media-stream``
+    * ``--window-position`` (Windows headless overlay workaround)
+
+    In stock mode all flags are emitted as before:
 
     * ``--force-webrtc-ip-handling-policy`` — pinned per proxy presence.
     * ``--lang`` — propagates to workers (CDP cannot).
-    * ``--window-size`` — matched to the fingerprint's screen dimensions so
-      ``innerWidth/Height`` never exceeds ``outerWidth/Height``.
-    * ``--user-agent`` — in headless mode, replaces the default
-      ``HeadlessChrome/...`` UA at the binary level. CDP
-      ``Emulation.setUserAgentOverride`` only reaches the main thread;
-      Workers inherit the launch-time UA and would otherwise expose
-      ``HeadlessChrome`` to any cross-scope consistency check (CreepJS).
-    * ``--font-render-hinting=medium`` — headless Chrome defaults to
-      ``HINTING_FULL`` which produces different glyph metrics from headed
-      mode (``HINTING_MEDIUM``), reducing CSS-based font detection to a
-      fraction of headed-mode results.
-    * ``--force-effective-connection-type=4G`` — headless Chrome and
-      server environments often report ``navigator.connection.rtt === 0``
-      because the Network Quality Estimator cannot measure real latency.
-      Forcing 4G yields plausible values (rtt ~50-150 ms, downlink ~1.5 Mbps).
-    * ``--window-position`` — on Windows, headless Chrome 129+ can still
-      spawn a blank overlay window; off-screen placement hides it.
+    * ``--window-size`` — matched to the fingerprint's screen dimensions.
+    * ``--user-agent`` — headless: replaces ``HeadlessChrome/...`` UA at
+      the binary level so Workers never expose the headless string.
+    * ``--font-render-hinting=medium`` — matches headed glyph metrics.
+    * ``--force-effective-connection-type=4G`` — plausible RTT in headless.
+    * ``--window-position`` — Windows headless overlay workaround.
 
     Existing flags are never duplicated.
     """
     existing = list(browser_args or [])
     extra: list[str] = []
+    is_stealth = engine == "stealth"
 
     proxied = any(arg.startswith("--proxy-server=") for arg in existing)
     if not any("webrtc-ip-handling-policy" in arg for arg in existing):
         policy = "disable_non_proxied_udp" if proxied else "default_public_interface_only"
         extra.append(f"--force-webrtc-ip-handling-policy={policy}")
 
-    if fingerprint is not None:
+    if not is_stealth and fingerprint is not None:
         lang = fingerprint.primary_language
         if lang and not any(arg.startswith("--lang=") for arg in existing):
             extra.append(f"--lang={lang}")
 
     if headless:
-        if not any(arg.startswith("--window-size=") for arg in existing):
-            w = int(fingerprint.screen_width) if fingerprint and fingerprint.screen_width else 1920
-            h = int(fingerprint.screen_height) if fingerprint and fingerprint.screen_height else 1080
-            extra.append(f"--window-size={w},{h}")
+        if not is_stealth:
+            if not any(arg.startswith("--window-size=") for arg in existing):
+                w = int(fingerprint.screen_width) if fingerprint and fingerprint.screen_width else 1920
+                h = int(fingerprint.screen_height) if fingerprint and fingerprint.screen_height else 1080
+                extra.append(f"--window-size={w},{h}")
 
         if sys.platform == "win32" and not any(
             arg.startswith("--window-position=") for arg in existing
         ):
             extra.append("--window-position=-2400,-2400")
 
-        if not any(arg.startswith("--user-agent=") for arg in existing):
-            major = (
-                _detect_chrome_major(browser_executable_path)
-                if browser_executable_path
-                else None
-            )
-            if major:
-                ua = _build_clean_ua(major=major, fingerprint=fingerprint)
-                extra.append(f"--user-agent={ua}")
-                logger.info(
-                    "Headless UA launch flag: Chrome/%s (propagates to Workers)", major
+        if not is_stealth:
+            if not any(arg.startswith("--user-agent=") for arg in existing):
+                major = (
+                    _detect_chrome_major(browser_executable_path)
+                    if browser_executable_path
+                    else None
                 )
+                if major:
+                    ua = _build_clean_ua(major=major, fingerprint=fingerprint)
+                    extra.append(f"--user-agent={ua}")
+                    logger.info(
+                        "Headless UA launch flag: Chrome/%s (propagates to Workers)", major
+                    )
 
-        if not any("font-render-hinting" in arg for arg in existing):
-            extra.append("--font-render-hinting=medium")
+            if not any("font-render-hinting" in arg for arg in existing):
+                extra.append("--font-render-hinting=medium")
 
         if not any("force-effective-connection-type" in arg for arg in existing):
             extra.append("--force-effective-connection-type=4G")
