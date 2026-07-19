@@ -5,6 +5,14 @@ automatically by [release-please](https://github.com/googleapis/release-please);
 entries below are generated from [Conventional Commit](https://www.conventionalcommits.org/)
 messages. Do not edit released sections by hand.
 
+## [0.51.1](https://github.com/codeisalifestyle/mithwire/compare/v0.51.0...v0.51.1) (2026-07-19)
+
+
+### Bug Fixes
+
+* **ci:** add timeout-minutes to all release jobs ([9e7cffc](https://github.com/codeisalifestyle/mithwire/commit/9e7cffca0a392f895c0aa205d0c73a9474f2e7d4))
+* **ci:** add timeout-minutes to all release jobs ([392a80b](https://github.com/codeisalifestyle/mithwire/commit/392a80bcf4d0add82b877289d70716a3b7f17b81))
+
 ## [0.51.0](https://github.com/codeisalifestyle/mithwire/compare/v0.50.8...v0.51.0) (2026-07-19)
 
 
