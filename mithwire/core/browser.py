@@ -440,7 +440,7 @@ class Browser(Connection):
             webrtc_leak_protection=getattr(config, "webrtc_leak_protection", "auto"),
             headless=bool(getattr(config, "headless", False)),
             proxied=proxied,
-            engine=getattr(config, "engine", "stock"),
+            engine=getattr(config, "engine", "cdp"),
         )
         # A freshly attached tab needs a brief moment before CDP overrides and
         # new-document scripts reliably register on the about:blank target.

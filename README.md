@@ -21,7 +21,7 @@
 
 mithwire is an anti-detect browser automation framework with **two stealth modes** that cover different deployment scenarios.
 
-### Stock mode (CDP)
+### CDP mode (default)
 
 The default. mithwire launches a normal Chromium-based browser (Chrome, Brave, Edge) and controls it directly over the [Chrome DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/). There is no automation driver bolted on the side — the tell-tale signals anti-bot systems use to spot WebDriver/Selenium simply aren't there.
 
@@ -41,11 +41,11 @@ The browser's JavaScript sees only native values — there are no runtime overri
 
 | Scenario | Mode | Why |
 | --- | --- | --- |
-| Scripting on your Mac/Windows laptop | **Stock** | Host hardware is real — no need to lie about GPU, fonts, or canvas |
-| Headless server, no spoofing needed | **Stock** | CDP stealth is sufficient when the profile matches the machine |
+| Scripting on your Mac/Windows laptop | **CDP** | Host hardware is real — no need to lie about GPU, fonts, or canvas |
+| Headless server, no spoofing needed | **CDP** | CDP stealth is sufficient when the profile matches the machine |
 | Production VPS scraping/automation | **Stealth** | Linux servers expose SwiftShader, minimal fonts, headless signals — the binary patches these at the source |
 | Advanced anti-bot targets (CreepJS, DAB) | **Stealth** | Deep fingerprint surfaces (canvas hash, WebGL renderer, audio context) need native-level randomization |
-| AI agent fleet via mithwire-mcp | **Either** | Stock for local agents, stealth for cloud/VPS agents — [mithwire-mcp](https://github.com/codeisalifestyle/mithwire-mcp) supports both via `engine` parameter |
+| AI agent fleet via mithwire-mcp | **Either** | CDP for local agents, stealth for cloud/VPS agents — [mithwire-mcp](https://github.com/codeisalifestyle/mithwire-mcp) supports both via `engine` parameter |
 
 > Stealth mode requires the `cloakbrowser` package and is currently Linux-only for the latest free builds. See [mithwire-mcp](https://github.com/codeisalifestyle/mithwire-mcp) for the full stealth integration (session management, proxy alignment, profile persistence, and fleet orchestration).
 
@@ -55,7 +55,7 @@ The browser's JavaScript sees only native values — there are no runtime overri
 
 **Anti-detect by design** — speaks raw CDP: no `navigator.webdriver`, no chromedriver binary, no Selenium surface to fingerprint
 
-**Dual stealth engine** — stock mode for local machines (CDP/JS overrides), stealth mode for production servers (C++ binary-level patches on canvas, WebGL, audio, fonts, GPU, TLS)
+**Dual stealth engine** — CDP mode for local machines (CDP/JS overrides), stealth mode for production servers (C++ binary-level patches on canvas, WebGL, audio, fonts, GPU, TLS)
 
 **Real Chromium browsers** — works with Chrome, Chromium, Brave, Edge, and patched CloakBrowser binaries
 
@@ -94,7 +94,7 @@ mithwire into a tool your LLM can drive directly.
 - **Fleet management** — spin up many isolated sessions at once, each its own browser process, with full lifecycle control
 - **Durable identities** — persistent profiles with their own cookies, proxies, and fingerprints that survive across runs
 - **Consistent stealth at scale** — proxy-aligned timezone/locale/geo, fingerprint spoofing, and WebRTC leak protection kept in sync per worker
-- **Dual engine support** — `engine=stock` or `engine=stealth` per session, mixing modes across a fleet
+- **Dual engine support** — `engine=cdp` or `engine=stealth` per session, mixing modes across a fleet
 
 [**Get started with mithwire-mcp**](https://github.com/codeisalifestyle/mithwire-mcp)
 
@@ -204,7 +204,7 @@ Most "stealth" tools either drive the browser through WebDriver/Selenium (which
 leaks an obvious automation surface) or patch over it with injected JavaScript
 (which is itself detectable). mithwire skips both:
 
-- **Stock mode** speaks the browser's own debug protocol directly — no driver to fingerprint, no injected shim to catch.
+- **CDP mode** speaks the browser's own debug protocol directly — no driver to fingerprint, no injected shim to catch.
 - **Stealth mode** goes further with a patched Chromium binary that modifies fingerprint surfaces at the C++ level — canvas hashes, WebGL renderers, audio contexts, and more are natively randomized, invisible to any JavaScript introspection.
 
 No other open-source Python framework combines both approaches under a single API.

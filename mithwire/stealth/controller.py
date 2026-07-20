@@ -18,7 +18,7 @@ fall back to JS only for the handful of properties with no CDP override
 renderer strings).
 
 This module was extracted verbatim (behaviour-preserving) from the historical
-``mithwire_mcp.browser.BridgeBrowser`` so that ownership of the anti-detect
+``mithwire_mcp.browser.MithwireBrowser`` so that ownership of the anti-detect
 implementation lives with the browser engine, not a single client.
 """
 
@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import warnings
 from typing import Any, ClassVar
 
 from ..cdp import browser as cdp_browser
@@ -54,7 +55,7 @@ class Stealth:
         webrtc_leak_protection: str = "auto",
         headless: bool = False,
         proxied: bool = False,
-        engine: str = "stock",
+        engine: str = "cdp",
     ) -> None:
         self.browser = browser
         self.fingerprint = fingerprint or FingerprintConfig()
@@ -66,11 +67,20 @@ class Stealth:
         self.webrtc_leak_protection = (webrtc_leak_protection or "auto").strip().lower()
         self.headless = headless
         self.proxied = proxied
-        # Engine mode: "stock" (default) uses full CDP/JS overrides; "stealth"
+        # Engine mode: "cdp" (default) uses full CDP/JS overrides; "stealth"
         # means a CloakBrowser binary with C++ patches is running, so JS/CDP
         # fingerprint overrides are skipped (the binary handles them natively).
         # Only CDP timezone/locale/geolocation remain active in stealth mode.
-        self.engine = (engine or "stock").strip().lower()
+        raw_engine = (engine or "cdp").strip().lower()
+        if raw_engine == "stock":
+            warnings.warn(
+                "engine='stock' is deprecated, use engine='cdp' instead. "
+                "'stock' will be removed in a future release.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            raw_engine = "cdp"
+        self.engine = raw_engine
         self.timezone_id: str | None = None
         self.tab: Any = getattr(browser, "main_tab", None)
         self._page_domain_tab: Any | None = None
@@ -329,7 +339,7 @@ class Stealth:
         - Media devices: ``--use-fake-device-for-media-stream`` launch flag
           provides native Chrome MediaDeviceInfo objects (see __init__.py).
         - Speech voices: requires system-level speech-dispatcher installation.
-        - WebGL SwiftShader: accepted limitation of stock mode on GPU-less
+        - WebGL SwiftShader: accepted limitation of CDP mode on GPU-less
           servers. The stealth engine (CloakBrowser) handles WebGL at the
           binary level. Users can also set ``webgl_vendor``/``webgl_renderer``
           in FingerprintConfig for explicit overrides (accepted tradeoff:

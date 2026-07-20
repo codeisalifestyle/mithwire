@@ -94,7 +94,7 @@ def compute_launch_args(
     fingerprint: "FingerprintConfig | None" = None,
     headless: bool = False,
     browser_executable_path: str | None = None,
-    engine: str = "stock",
+    engine: str = "cdp",
 ) -> list[str]:
     """Return the stealth launch flags to append, given the existing args.
 
@@ -112,7 +112,7 @@ def compute_launch_args(
     * ``--use-fake-device-for-media-stream``
     * ``--window-position`` (Windows headless overlay workaround)
 
-    In stock mode all flags are emitted as before:
+    In CDP mode all flags are emitted as before:
 
     * ``--force-webrtc-ip-handling-policy`` — pinned per proxy presence.
     * ``--lang`` — propagates to workers (CDP cannot).
@@ -127,6 +127,8 @@ def compute_launch_args(
     """
     existing = list(browser_args or [])
     extra: list[str] = []
+    if engine == "stock":
+        engine = "cdp"
     is_stealth = engine == "stealth"
 
     proxied = any(arg.startswith("--proxy-server=") for arg in existing)
