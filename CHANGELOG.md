@@ -5,6 +5,19 @@ automatically by [release-please](https://github.com/googleapis/release-please);
 entries below are generated from [Conventional Commit](https://www.conventionalcommits.org/)
 messages. Do not edit released sections by hand.
 
+## [0.51.2](https://github.com/codeisalifestyle/mithwire/compare/v0.51.1...v0.51.2) (2026-07-20)
+
+
+### Features
+
+* add proxy, fingerprint_gen, cloakbrowser, virtual_display modules ([86ff6a7](https://github.com/codeisalifestyle/mithwire/commit/86ff6a794af03473f93b76c1bc1413e0490774ed))
+* add proxy, fingerprint_gen, cloakbrowser, virtual_display to engine ([2b29dfb](https://github.com/codeisalifestyle/mithwire/commit/2b29dfb1fb0b29f347a5043da549210edb5c7d54))
+* guard stealth launch args to prevent CDP/binary worker inconsistency ([892fd32](https://github.com/codeisalifestyle/mithwire/commit/892fd32b45ad38f1330ab76385c67af6e2515766))
+* rename engine mode stock → cdp ([29dbab6](https://github.com/codeisalifestyle/mithwire/commit/29dbab620f7eb22edfe42b381fedbeea5c9b0c92))
+* rename engine mode stock → cdp with deprecation alias ([addc2ab](https://github.com/codeisalifestyle/mithwire/commit/addc2ab5601ca25bd27de14d5a0e3f0ab26b16cc))
+* stealth engine guard — prevent CDP/binary worker inconsistency ([92c03dc](https://github.com/codeisalifestyle/mithwire/commit/92c03dc4f96688ab12793306497d6276f0ab5faa))
+* stealth engine guard + macOS stealth support ([b41aed0](https://github.com/codeisalifestyle/mithwire/commit/b41aed070f6d8008e29d140ad8fa79827ae2c616))
+
 ## [0.51.1](https://github.com/codeisalifestyle/mithwire/compare/v0.51.0...v0.51.1) (2026-07-19)
 
 
