@@ -67,6 +67,8 @@ requires = ["setuptools>=43.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project.optional-dependencies]
+fingerprints = ["browserforge"]
+stealth = ["cloakbrowser"]
 dev = [
     "black",
     "build",
