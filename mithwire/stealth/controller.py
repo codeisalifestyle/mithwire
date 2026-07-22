@@ -837,7 +837,12 @@ class Stealth:
                 # height; in headed (Xvfb) mode the real window geometry does
                 # this naturally, so we just set screen dims + DPR.
                 chrome_h = 85 + int(dpr * 10)  # 85-100 px, realistic range
-                vw = sw
+                # In headed mode the real OS window drives the layout viewport;
+                # width/height=0 disables the CDP override so innerWidth/Height
+                # follow the physical window while screen_width/screen_height
+                # and device_scale_factor still get spoofed.  In headless there
+                # is no real window, so we must set explicit dimensions.
+                vw = sw if self.headless else 0
                 vh = max(sh - chrome_h, sh // 2) if self.headless else 0
                 await self.tab.send(
                     emu.set_device_metrics_override(
