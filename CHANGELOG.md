@@ -5,6 +5,13 @@ automatically by [release-please](https://github.com/googleapis/release-please);
 entries below are generated from [Conventional Commit](https://www.conventionalcommits.org/)
 messages. Do not edit released sections by hand.
 
+## [0.51.3](https://github.com/codeisalifestyle/mithwire/compare/v0.51.2...v0.51.3) (2026-07-22)
+
+
+### Bug Fixes
+
+* don't override layout viewport width in headed CDP mode ([#24](https://github.com/codeisalifestyle/mithwire/issues/24)) ([6e0832a](https://github.com/codeisalifestyle/mithwire/commit/6e0832a405382c08a0190c528a0cf639bd1935a8))
+
 ## [0.51.2](https://github.com/codeisalifestyle/mithwire/compare/v0.51.1...v0.51.2) (2026-07-20)
 
 
