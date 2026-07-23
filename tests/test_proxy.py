@@ -145,6 +145,64 @@ class FingerprintGenTest(unittest.TestCase):
         isinstance(is_available(), bool)
 
 
+class ProbeRedirectFallbackTest(unittest.TestCase):
+    """Verify probe_proxy falls back to ip-api.com on redirect / timeout."""
+
+    def test_normalize_ip_api_response(self) -> None:
+        from mithwire.proxy.health import _normalize_ip_api_response
+        raw = {
+            "query": "1.2.3.4",
+            "country": "United Kingdom",
+            "countryCode": "GB",
+            "city": "London",
+            "timezone": "Europe/London",
+            "lat": 51.5,
+            "lon": -0.12,
+        }
+        result = _normalize_ip_api_response(raw)
+        self.assertEqual(result["ip"], "1.2.3.4")
+        self.assertEqual(result["location"]["country"], "United Kingdom")
+        self.assertEqual(result["location"]["country_code"], "GB")
+        self.assertEqual(result["location"]["timezone"], "Europe/London")
+        self.assertEqual(result["location"]["latitude"], 51.5)
+
+    def test_parse_egress_407(self) -> None:
+        from mithwire.proxy.health import ProxyHealthError, _parse_egress_response
+        cfg = ProxyConfig(scheme="http", host="h", port=1)
+        with self.assertRaises(ProxyHealthError) as ctx:
+            _parse_egress_response(cfg, 407, b"")
+        self.assertIn("407", str(ctx.exception))
+
+    def test_parse_egress_empty_body(self) -> None:
+        from mithwire.proxy.health import ProxyHealthError, _parse_egress_response
+        cfg = ProxyConfig(scheme="http", host="h", port=1)
+        with self.assertRaises(ProxyHealthError):
+            _parse_egress_response(cfg, 200, b"")
+
+    def test_parse_egress_ip_api_schema(self) -> None:
+        from mithwire.proxy.health import _parse_egress_response
+        import json
+        cfg = ProxyConfig(scheme="http", host="h", port=1)
+        body = json.dumps({
+            "query": "9.8.7.6",
+            "country": "Germany",
+            "countryCode": "DE",
+            "city": "Berlin",
+            "timezone": "Europe/Berlin",
+            "lat": 52.52,
+            "lon": 13.4,
+        }).encode()
+        result = _parse_egress_response(cfg, 200, body, schema="ip-api")
+        self.assertEqual(result["ip"], "9.8.7.6")
+        self.assertEqual(result["location"]["country_code"], "DE")
+
+    def test_no_redirect_handler_blocks_redirect(self) -> None:
+        from mithwire.proxy.health import _NoRedirectHandler
+        handler = _NoRedirectHandler()
+        result = handler.redirect_request(None, None, 301, "Moved", {}, "http://x")
+        self.assertIsNone(result)
+
+
 class EgressSummaryTest(unittest.TestCase):
     def test_empty_returns_none(self) -> None:
         from mithwire.proxy import egress_summary
