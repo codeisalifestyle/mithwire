@@ -111,7 +111,6 @@ class VirtualDisplayTest(unittest.TestCase):
         from mithwire.core.virtual_display import ensure_virtual_display
         if not sys.platform.startswith("linux"):
             result = ensure_virtual_display()
-            # On non-Linux, returns DISPLAY env var or None
             self.assertIsNone(result) if not __import__("os").environ.get("DISPLAY") else None
 
 
@@ -141,88 +140,11 @@ class CloakBrowserAdapterTest(unittest.TestCase):
 class FingerprintGenTest(unittest.TestCase):
     def test_is_available(self) -> None:
         from mithwire.fingerprint_gen import is_available
-        # Just verify it doesn't crash; availability depends on install
         isinstance(is_available(), bool)
 
 
-class ProbeRedirectFallbackTest(unittest.TestCase):
-    """Verify probe_proxy falls back to ip-api.com on redirect / timeout."""
-
-    def test_normalize_ip_api_response(self) -> None:
-        from mithwire.proxy.health import _normalize_ip_api_response
-        raw = {
-            "query": "1.2.3.4",
-            "country": "United Kingdom",
-            "countryCode": "GB",
-            "city": "London",
-            "timezone": "Europe/London",
-            "lat": 51.5,
-            "lon": -0.12,
-        }
-        result = _normalize_ip_api_response(raw)
-        self.assertEqual(result["ip"], "1.2.3.4")
-        self.assertEqual(result["location"]["country"], "United Kingdom")
-        self.assertEqual(result["location"]["country_code"], "GB")
-        self.assertEqual(result["location"]["timezone"], "Europe/London")
-        self.assertEqual(result["location"]["latitude"], 51.5)
-
-    def test_parse_egress_407(self) -> None:
-        from mithwire.proxy.health import ProxyHealthError, _parse_egress_response
-        cfg = ProxyConfig(scheme="http", host="h", port=1)
-        with self.assertRaises(ProxyHealthError) as ctx:
-            _parse_egress_response(cfg, 407, b"")
-        self.assertIn("407", str(ctx.exception))
-
-    def test_parse_egress_empty_body(self) -> None:
-        from mithwire.proxy.health import ProxyHealthError, _parse_egress_response
-        cfg = ProxyConfig(scheme="http", host="h", port=1)
-        with self.assertRaises(ProxyHealthError):
-            _parse_egress_response(cfg, 200, b"")
-
-    def test_parse_egress_ip_api_schema(self) -> None:
-        from mithwire.proxy.health import _parse_egress_response
-        import json
-        cfg = ProxyConfig(scheme="http", host="h", port=1)
-        body = json.dumps({
-            "query": "9.8.7.6",
-            "country": "Germany",
-            "countryCode": "DE",
-            "city": "Berlin",
-            "timezone": "Europe/Berlin",
-            "lat": 52.52,
-            "lon": 13.4,
-        }).encode()
-        result = _parse_egress_response(cfg, 200, body, schema="ip-api")
-        self.assertEqual(result["ip"], "9.8.7.6")
-        self.assertEqual(result["location"]["country_code"], "DE")
-
-    def test_no_redirect_handler_blocks_redirect(self) -> None:
-        from mithwire.proxy.health import _NoRedirectHandler
-        handler = _NoRedirectHandler()
-        result = handler.redirect_request(None, None, 301, "Moved", {}, "http://x")
-        self.assertIsNone(result)
-
-
-class EgressSummaryTest(unittest.TestCase):
-    def test_empty_returns_none(self) -> None:
-        from mithwire.proxy import egress_summary
-        self.assertIsNone(egress_summary(None))
-        self.assertIsNone(egress_summary({}))
-
-    def test_picks_fields(self) -> None:
-        from mithwire.proxy import egress_summary
-        data = {
-            "ip": "1.2.3.4",
-            "location": {"timezone": "Europe/London", "country": "UK", "city": "London", "country_code": "GB"},
-        }
-        result = egress_summary(data)
-        assert result is not None
-        self.assertEqual(result["exit_ip"], "1.2.3.4")
-        self.assertEqual(result["timezone"], "Europe/London")
-
-
 class NormalizeIpApiResponseTest(unittest.TestCase):
-    """Tests for the ip-api.com → ipapi.is schema normalization."""
+    """Tests for the ip-api.com -> ipapi.is schema normalization."""
 
     def test_full_response(self) -> None:
         from mithwire.proxy.health import _normalize_ip_api_response
@@ -245,7 +167,7 @@ class NormalizeIpApiResponseTest(unittest.TestCase):
         self.assertAlmostEqual(normalized["location"]["latitude"], 51.5074, places=4)
         self.assertAlmostEqual(normalized["location"]["longitude"], -0.1278, places=4)
 
-    def test_missing_fields_produce_empty_strings(self) -> None:
+    def test_missing_fields_produce_none(self) -> None:
         from mithwire.proxy.health import _normalize_ip_api_response
         normalized = _normalize_ip_api_response({"query": "1.2.3.4"})
         self.assertEqual(normalized["ip"], "1.2.3.4")
@@ -271,77 +193,135 @@ class NormalizeIpApiResponseTest(unittest.TestCase):
         self.assertEqual(summary["country_code"], "DE")
 
 
-class ProbeFallbackBehaviorTest(unittest.IsolatedAsyncioTestCase):
-    """Verify the primary → fallback chain in probe_proxy."""
+class ParseEgressResponseTest(unittest.TestCase):
+    """Tests for _parse_egress_response validation."""
 
-    async def test_primary_success_skips_fallback(self) -> None:
+    def test_407_raises_auth_error(self) -> None:
+        from mithwire.proxy.health import ProxyHealthError, _parse_egress_response
+        cfg = ProxyConfig(scheme="http", host="h", port=1)
+        with self.assertRaises(ProxyHealthError) as ctx:
+            _parse_egress_response(cfg, 407, b"")
+        self.assertIn("407", str(ctx.exception))
+
+    def test_empty_body_raises(self) -> None:
+        from mithwire.proxy.health import ProxyHealthError, _parse_egress_response
+        cfg = ProxyConfig(scheme="http", host="h", port=1)
+        with self.assertRaises(ProxyHealthError):
+            _parse_egress_response(cfg, 200, b"")
+
+    def test_valid_ip_api_response(self) -> None:
+        import json as _json
+        from mithwire.proxy.health import _parse_egress_response
+        cfg = ProxyConfig(scheme="http", host="h", port=1)
+        body = _json.dumps({
+            "query": "9.8.7.6",
+            "country": "Germany",
+            "countryCode": "DE",
+            "city": "Berlin",
+            "timezone": "Europe/Berlin",
+            "lat": 52.52,
+            "lon": 13.4,
+        }).encode()
+        result = _parse_egress_response(cfg, 200, body)
+        self.assertEqual(result["ip"], "9.8.7.6")
+        self.assertEqual(result["location"]["country_code"], "DE")
+
+    def test_non_json_raises(self) -> None:
+        from mithwire.proxy.health import ProxyHealthError, _parse_egress_response
+        cfg = ProxyConfig(scheme="http", host="h", port=1)
+        with self.assertRaises(ProxyHealthError):
+            _parse_egress_response(cfg, 200, b"<html>not json</html>")
+
+    def test_missing_ip_raises(self) -> None:
+        import json as _json
+        from mithwire.proxy.health import ProxyHealthError, _parse_egress_response
+        cfg = ProxyConfig(scheme="http", host="h", port=1)
+        body = _json.dumps({"country": "UK"}).encode()
+        with self.assertRaises(ProxyHealthError):
+            _parse_egress_response(cfg, 200, body)
+
+
+class EgressSummaryTest(unittest.TestCase):
+    def test_empty_returns_none(self) -> None:
+        from mithwire.proxy import egress_summary
+        self.assertIsNone(egress_summary(None))
+        self.assertIsNone(egress_summary({}))
+
+    def test_picks_fields(self) -> None:
+        from mithwire.proxy import egress_summary
+        data = {
+            "ip": "1.2.3.4",
+            "location": {"timezone": "Europe/London", "country": "UK", "city": "London", "country_code": "GB"},
+        }
+        result = egress_summary(data)
+        assert result is not None
+        self.assertEqual(result["exit_ip"], "1.2.3.4")
+        self.assertEqual(result["timezone"], "Europe/London")
+
+
+class ProbeProxyBehaviorTest(unittest.IsolatedAsyncioTestCase):
+    """Verify probe_proxy gates browser launch correctly."""
+
+    async def test_http_probe_returns_identity(self) -> None:
         from unittest.mock import AsyncMock, patch
         from mithwire.proxy import ProxyConfig, probe_proxy
 
         cfg = ProxyConfig(scheme="http", host="h", port=1)
-        primary_data = {"ip": "1.2.3.4", "location": {"timezone": "UTC"}}
+        egress = {"ip": "1.2.3.4", "location": {"timezone": "UTC"}}
 
-        with patch("mithwire.proxy.health._http_egress_probe", new=AsyncMock(return_value=primary_data)) as m_primary, \
-             patch("mithwire.proxy.health._http_egress_probe_plaintext", new=AsyncMock()) as m_fallback:
+        with patch("mithwire.proxy.health._http_egress_probe", new=AsyncMock(return_value=egress)):
             result = await probe_proxy(cfg, timeout_seconds=2.0)
             self.assertEqual(result["ip"], "1.2.3.4")
-            m_primary.assert_awaited_once()
-            m_fallback.assert_not_awaited()
 
-    async def test_primary_timeout_triggers_fallback(self) -> None:
+    async def test_probe_failure_raises(self) -> None:
         from unittest.mock import AsyncMock, patch
         from mithwire.proxy import ProxyConfig, probe_proxy
         from mithwire.proxy.health import ProxyHealthError
 
         cfg = ProxyConfig(scheme="http", host="h", port=1)
-        fallback_data = {"ip": "5.6.7.8", "location": {"timezone": "UTC"}, "_probe_source": "ip-api.com (HTTP fallback)"}
 
-        with patch("mithwire.proxy.health._http_egress_probe", new=AsyncMock(side_effect=ProxyHealthError("timeout"))), \
-             patch("mithwire.proxy.health._http_egress_probe_plaintext", new=AsyncMock(return_value=fallback_data)):
-            result = await probe_proxy(cfg, timeout_seconds=2.0)
-            self.assertEqual(result["ip"], "5.6.7.8")
-            self.assertIn("fallback", result.get("_probe_source", ""))
+        with patch("mithwire.proxy.health._http_egress_probe",
+                    new=AsyncMock(side_effect=ProxyHealthError("connect refused"))):
+            with self.assertRaises(ProxyHealthError):
+                await probe_proxy(cfg, timeout_seconds=2.0)
 
-    async def test_auth_failure_skips_fallback(self) -> None:
+    async def test_auth_failure_raises_with_407(self) -> None:
         from unittest.mock import AsyncMock, patch
         from mithwire.proxy import ProxyConfig, probe_proxy
         from mithwire.proxy.health import ProxyHealthError
 
         cfg = ProxyConfig(scheme="http", host="h", port=1, username="u", password="p")
 
-        with patch("mithwire.proxy.health._http_egress_probe", new=AsyncMock(side_effect=ProxyHealthError("407 bad creds"))), \
-             patch("mithwire.proxy.health._http_egress_probe_plaintext", new=AsyncMock()) as m_fallback:
+        with patch("mithwire.proxy.health._http_egress_probe",
+                    new=AsyncMock(side_effect=ProxyHealthError("407 bad creds"))):
             with self.assertRaises(ProxyHealthError) as ctx:
                 await probe_proxy(cfg, timeout_seconds=2.0)
             self.assertIn("407", str(ctx.exception))
-            m_fallback.assert_not_awaited()
 
-    async def test_both_fail_raises_primary_error(self) -> None:
-        from unittest.mock import AsyncMock, patch
-        from mithwire.proxy import ProxyConfig, probe_proxy
-        from mithwire.proxy.health import ProxyHealthError
-
-        cfg = ProxyConfig(scheme="http", host="h", port=1)
-
-        with patch("mithwire.proxy.health._http_egress_probe", new=AsyncMock(side_effect=ProxyHealthError("primary timeout"))), \
-             patch("mithwire.proxy.health._http_egress_probe_plaintext", new=AsyncMock(side_effect=ProxyHealthError("fallback timeout"))):
-            with self.assertRaises(ProxyHealthError) as ctx:
-                await probe_proxy(cfg, timeout_seconds=2.0)
-            self.assertIn("primary timeout", str(ctx.exception))
-
-    async def test_socks_still_uses_tcp_check_only(self) -> None:
+    async def test_socks_uses_tcp_check_only(self) -> None:
         from unittest.mock import AsyncMock, patch
         from mithwire.proxy import ProxyConfig, probe_proxy
 
         cfg = ProxyConfig(scheme="socks5", host="127.0.0.1", port=1)
 
-        with patch("mithwire.proxy.health._check_tcp", new=AsyncMock()), \
-             patch("mithwire.proxy.health._http_egress_probe", new=AsyncMock()) as m_primary, \
-             patch("mithwire.proxy.health._http_egress_probe_plaintext", new=AsyncMock()) as m_fallback:
+        with patch("mithwire.proxy.health._check_tcp", new=AsyncMock()) as m_tcp, \
+             patch("mithwire.proxy.health._http_egress_probe", new=AsyncMock()) as m_http:
             result = await probe_proxy(cfg, timeout_seconds=2.0)
             self.assertEqual(result, {})
-            m_primary.assert_not_awaited()
-            m_fallback.assert_not_awaited()
+            m_tcp.assert_awaited_once()
+            m_http.assert_not_awaited()
+
+    async def test_socks_tcp_failure_raises(self) -> None:
+        from unittest.mock import AsyncMock, patch
+        from mithwire.proxy import ProxyConfig, probe_proxy
+        from mithwire.proxy.health import ProxyHealthError
+
+        cfg = ProxyConfig(scheme="socks5", host="127.0.0.1", port=1)
+
+        with patch("mithwire.proxy.health._check_tcp",
+                    new=AsyncMock(side_effect=ProxyHealthError("connect timeout"))):
+            with self.assertRaises(ProxyHealthError):
+                await probe_proxy(cfg, timeout_seconds=2.0)
 
 
 if __name__ == "__main__":

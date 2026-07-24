@@ -7,30 +7,25 @@ WRONG country, and any persistent profile gets cross-contaminated). So when
 ``start_session`` is given a proxy, we probe it *before* the browser is
 spawned and refuse to launch on failure.
 
-The probe issues a ``GET`` to ``api.ipapi.is`` **through the proxy**, with
-credentials when present. The same response is the canonical source we use to
-derive the default identity (timezone, language, geo) — so the probe doubles
-as the egress-info lookup that ``MithwireBrowser`` used to do *after* launch
-via ``align_timezone_to_proxy``. Doing it pre-launch means we never need to
+The probe issues a plain-HTTP ``GET`` to ``ip-api.com/json/`` **through the
+proxy**, with credentials when present. The response is the canonical source
+used to derive the default identity (timezone, language, geo) — so the probe
+doubles as the egress-info lookup. Doing it pre-launch means we never need to
 do it again, and a bad proxy fails fast with no half-launched browser to
 clean up.
 
 Notes on the implementation:
 
-* The probe drives a ``urllib.request`` GET through a ``ProxyHandler``. That
-  handler does the right thing for *both* possible upstreams: an absolute-form
-  ``GET`` over HTTP for ``http://``-shaped targets, and a ``CONNECT`` tunnel
-  with TLS for ``https://`` targets. ipapi.is now serves ``https`` only (the
-  ``http`` endpoint 301-redirects to it), so we point at the ``http`` URL and
-  let urllib follow the redirect through the proxy automatically — that
-  exercises the proxy's CONNECT + TLS path the same way the real browser will.
-* **Fallback for residential/mobile proxies**: many residential gateways don't
-  support CONNECT well (slow or timing out). When the primary HTTPS probe
-  fails on timeout or connection error (NOT auth 407), the probe automatically
-  retries with a plain-HTTP target (``ip-api.com/json/``) that requires only
-  an absolute-form GET — no CONNECT tunnel needed. The response is normalized
-  to the ipapi.is schema so downstream identity alignment is unaffected.
-* The synchronous ``urlopen`` runs in a worker thread; the surrounding
+* The probe uses a **raw TCP socket** to the proxy, sending an absolute-form
+  ``GET http://ip-api.com/json/ HTTP/1.1`` request. This avoids two classes of
+  failure that plagued urllib-based probes:
+  (a) ``api.ipapi.is`` 301-redirects to HTTPS, requiring a CONNECT tunnel that
+      many residential/mobile gateways don't support;
+  (b) even with a plain-HTTP target, urllib's ``Connection: close`` causes
+      keep-alive-only proxy gateways to hang until timeout.
+  The raw-socket approach uses ``Proxy-Connection: Keep-Alive`` and reads
+  exactly ``Content-Length`` bytes, sidestepping both issues.
+* The synchronous socket I/O runs in a worker thread; the surrounding
   ``asyncio.wait_for`` enforces an async-side deadline regardless of any
   socket-level timer.
 * SOCKS proxies get a TCP-only liveness check. We don't support authenticated
@@ -43,11 +38,11 @@ Notes on the implementation:
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import socket
 import urllib.error
-import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -55,14 +50,7 @@ from .config import ProxyConfig
 
 logger = logging.getLogger(__name__)
 
-# Primary probe target.  ipapi.is now 301-redirects http → https.  When urllib
-# follows that redirect it attempts an HTTP CONNECT tunnel for the TLS leg,
-# which many residential/mobile proxies don't support on their HTTP port —
-# causing a silent hang.  We disable auto-redirect and, if the primary hangs,
-# fall back to ip-api.com which still serves plain HTTP without redirecting.
-_PROBE_TARGET_URL = "http://api.ipapi.is/"
-_FALLBACK_PROBE_URL = "http://ip-api.com/json/"
-
+_PROBE_URL = "http://ip-api.com/json/"
 _DEFAULT_TIMEOUT_SECONDS = 8.0
 
 
@@ -110,8 +98,6 @@ async def trigger_rotation(
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 return int(response.status), response.read()
         except urllib.error.HTTPError as exc:
-            # Capture the server's response body too — providers often explain
-            # the failure (rate limit, expired token, etc.) in the JSON payload.
             try:
                 body = exc.read()
             except Exception:  # noqa: BLE001
@@ -148,8 +134,6 @@ async def trigger_rotation(
         try:
             parsed = json.loads(text)
         except json.JSONDecodeError:
-            # Providers occasionally reply with plain text ("ok"); surface it
-            # but don't fail — the HTTP 2xx is the authoritative success.
             parsed = {"raw": text.strip()[:500]}
 
     return {"status": status, "response": parsed}
@@ -162,52 +146,23 @@ async def probe_proxy(
 ) -> dict[str, Any]:
     """Verify the proxy is usable and (for HTTP/HTTPS) return egress identity.
 
-    Returns the parsed ipapi.is JSON for HTTP/HTTPS upstreams; an empty dict
-    for SOCKS upstreams (where only TCP reachability is checked). Raises
-    :class:`ProxyHealthError` with a redacted, actionable message on any
-    failure — bad host/port, refused TCP, HTTP 407 (wrong credentials), or an
-    unparseable response. The browser never starts on failure.
+    Returns parsed egress JSON (normalized to the ipapi.is schema) for
+    HTTP/HTTPS upstreams; an empty dict for SOCKS upstreams (where only TCP
+    reachability is checked). Raises :class:`ProxyHealthError` with a
+    redacted, actionable message on any failure — bad host/port, refused TCP,
+    HTTP 407 (wrong credentials), or an unparseable response.
 
-    For HTTP/HTTPS proxies the primary probe goes to ipapi.is (HTTPS via
-    CONNECT). If the CONNECT path times out or fails — common with
-    residential/mobile gateways — an automatic fallback probe hits a plain-HTTP
-    endpoint (ip-api.com) that only requires an absolute-form GET, no CONNECT.
-    Auth failures (407) are never retried via fallback.
+    **The browser never starts on failure.**
     """
     timeout = max(1.0, float(timeout_seconds))
     if proxy.is_socks:
         await _check_tcp(proxy, timeout=timeout)
         return {}
-
-    try:
-        return await _http_egress_probe(proxy, timeout=timeout)
-    except ProxyHealthError as primary_exc:
-        if _is_auth_failure(primary_exc):
-            raise
-        logger.info(
-            "Primary probe (HTTPS/CONNECT) failed for %s: %s — "
-            "retrying with plain-HTTP fallback.",
-            proxy.redacted(),
-            primary_exc,
-        )
-        try:
-            return await _http_egress_probe_plaintext(proxy, timeout=timeout)
-        except ProxyHealthError:
-            raise primary_exc from None
-
-
-def _is_auth_failure(exc: ProxyHealthError) -> bool:
-    """True when the error clearly indicates bad credentials (407)."""
-    return "407" in str(exc)
+    return await _http_egress_probe(proxy, timeout=timeout)
 
 
 async def _check_tcp(proxy: ProxyConfig, *, timeout: float) -> None:
-    """SOCKS / fallback liveness: just open and immediately close a TCP socket.
-
-    We don't drive a SOCKS5 negotiation here because the launch flow doesn't
-    support authenticated SOCKS anyway, so a successful TCP connect already
-    tells us as much as we can verify cheaply.
-    """
+    """SOCKS liveness: just open and immediately close a TCP socket."""
     try:
         reader, writer = await asyncio.wait_for(
             asyncio.open_connection(proxy.host, proxy.port),
@@ -229,32 +184,23 @@ async def _check_tcp(proxy: ProxyConfig, *, timeout: float) -> None:
         pass
 
 
-def _proxy_url_for_urllib(proxy: ProxyConfig) -> str:
-    """Build the proxy URL that ``urllib.request.ProxyHandler`` expects.
-
-    Userinfo gets percent-quoted — tokens often contain ``@`` / ``:`` / ``/``
-    which would otherwise corrupt the URL parser. We always advertise the
-    proxy with the ``http://`` scheme (urllib's HTTPS-through-proxy code path
-    uses HTTP for the proxy hop itself; the proxy scheme is unrelated to the
-    target scheme).
-    """
-    netloc = f"{proxy.host}:{proxy.port}"
-    if proxy.has_auth:
-        user = urllib.parse.quote(proxy.username or "", safe="")
-        pw = urllib.parse.quote(proxy.password or "", safe="")
-        return f"http://{user}:{pw}@{netloc}"
-    return f"http://{netloc}"
-
-
-class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-    """Prevent urllib from following redirects (avoids CONNECT tunneling)."""
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ARG002
-        return None
-
-
 def _normalize_ip_api_response(data: dict[str, Any]) -> dict[str, Any]:
-    """Map an ip-api.com response to the ipapi.is schema."""
+    """Map an ip-api.com response to the ipapi.is schema the stack expects.
+
+    ip-api.com returns a flat object::
+
+        {"query": "1.2.3.4", "country": "UK", "countryCode": "GB",
+         "city": "London", "timezone": "Europe/London",
+         "lat": 51.5, "lon": -0.12, ...}
+
+    The rest of the codebase (``FingerprintConfig.from_ipapi``,
+    ``egress_summary``) expects the ipapi.is layout::
+
+        {"ip": "1.2.3.4", "location": {"country": "UK",
+         "country_code": "GB", "city": "London",
+         "timezone": "Europe/London",
+         "latitude": 51.5, "longitude": -0.12}}
+    """
     return {
         "ip": data.get("query") or data.get("ip", ""),
         "location": {
@@ -272,15 +218,8 @@ def _parse_egress_response(
     proxy: ProxyConfig,
     status: int,
     body: bytes,
-    *,
-    schema: str = "ipapi",
 ) -> dict[str, Any]:
-    """Validate and parse a successful egress probe response.
-
-    ``schema`` selects the normalisation: ``"ipapi"`` (api.ipapi.is, the
-    default) passes through as-is; ``"ip-api"`` maps ``http://ip-api.com``
-    fields to the canonical schema.
-    """
+    """Validate the raw HTTP response and return normalized egress identity."""
     if status == 407:
         raise ProxyHealthError(
             f"Proxy {proxy.redacted()} rejected the supplied credentials "
@@ -314,8 +253,7 @@ def _parse_egress_response(
             "object."
         )
 
-    if schema == "ip-api":
-        data = _normalize_ip_api_response(data)
+    data = _normalize_ip_api_response(data)
 
     ip_field = data.get("ip")
     if not (isinstance(ip_field, str) and ip_field.strip()):
@@ -328,100 +266,15 @@ def _parse_egress_response(
     return data
 
 
-async def _http_egress_probe(proxy: ProxyConfig, *, timeout: float) -> dict[str, Any]:
-    """Drive a GET to an IP-info service through the proxy and return egress JSON.
-
-    Tries ``api.ipapi.is`` first (with redirects disabled to avoid CONNECT
-    tunneling through proxies that only support absolute-form HTTP). Falls back
-    to ``ip-api.com`` (plain HTTP, no redirect) when the primary times out or
-    fails — a common scenario with residential/mobile HTTP proxies.
-    """
-    proxy_url = _proxy_url_for_urllib(proxy)
-
-    def _fetch(url: str, *, follow_redirects: bool = False) -> tuple[int, bytes]:
-        handlers: list = [urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url})]
-        if not follow_redirects:
-            handlers.append(_NoRedirectHandler)
-        opener = urllib.request.build_opener(*handlers)
-        request = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": "mithwire/proxy-probe",
-                "Accept": "application/json, */*",
-                "Connection": "close",
-            },
-            method="GET",
-        )
-        try:
-            with opener.open(request, timeout=timeout) as response:
-                return int(response.status), response.read()
-        except urllib.error.HTTPError as exc:
-            try:
-                body = exc.read()
-            except Exception:  # noqa: BLE001
-                body = b""
-            return int(exc.code), body
-
-    primary_exc: Exception | None = None
-
-    # --- Attempt 1: api.ipapi.is (redirects disabled) ---
-    try:
-        status, body = await asyncio.wait_for(
-            asyncio.to_thread(_fetch, _PROBE_TARGET_URL, follow_redirects=False),
-            timeout=timeout + 2.0,
-        )
-        if 300 <= status < 400:
-            logger.debug(
-                "Primary probe returned %d redirect — falling back to ip-api.com",
-                status,
-            )
-            raise ProxyHealthError("primary probe redirected")
-        return _parse_egress_response(proxy, status, body)
-    except (ProxyHealthError, asyncio.TimeoutError, urllib.error.URLError,
-            ConnectionError, OSError) as exc:
-        primary_exc = exc
-        logger.debug("Primary egress probe failed (%s), trying fallback", exc)
-
-    # --- Attempt 2: ip-api.com (plain HTTP, no redirect) ---
-    try:
-        status, body = await asyncio.wait_for(
-            asyncio.to_thread(_fetch, _FALLBACK_PROBE_URL, follow_redirects=True),
-            timeout=timeout + 2.0,
-        )
-        return _parse_egress_response(proxy, status, body, schema="ip-api")
-    except asyncio.TimeoutError as exc:
-        raise ProxyHealthError(
-            f"Proxy {proxy.redacted()} did not complete the egress probe "
-            f"within {timeout:.1f}s (both primary and fallback timed out)."
-        ) from exc
-    except urllib.error.URLError as exc:
-        reason = exc.reason
-        if isinstance(reason, socket.timeout):
-            raise ProxyHealthError(
-                f"Proxy {proxy.redacted()} timed out during the egress probe "
-                f"(socket timeout on fallback)."
-            ) from exc
-        raise ProxyHealthError(
-            f"Could not reach proxy {proxy.redacted()}: {reason}"
-        ) from exc
-    except (ConnectionError, OSError) as exc:
-        raise ProxyHealthError(
-            f"Proxy {proxy.redacted()} failed mid-probe: {exc}"
-        ) from exc
-
-
-async def _http_egress_probe_plaintext(
+async def _http_egress_probe(
     proxy: ProxyConfig, *, timeout: float
 ) -> dict[str, Any]:
-    """Last-resort egress probe using raw sockets over plain HTTP.
+    """Probe the proxy via a plain-HTTP GET to ip-api.com using raw sockets.
 
-    When even urllib's ip-api.com fallback hangs (residential proxies that
-    keep connections alive regardless of ``Connection: close``), this probe
-    bypasses urllib entirely. It opens a raw TCP socket to the proxy, sends an
-    absolute-form ``GET`` with ``Proxy-Connection: Keep-Alive``, and reads
-    exactly ``Content-Length`` bytes — avoiding the EOF-wait hang.
+    Uses an absolute-form ``GET`` (no CONNECT tunnel) so it works with every
+    class of HTTP proxy — datacenter, residential, mobile. Reads exactly
+    ``Content-Length`` bytes to avoid hanging on keep-alive-only gateways.
     """
-    import base64
 
     def _fetch() -> tuple[int, bytes]:
         auth_header = ""
@@ -432,10 +285,10 @@ async def _http_egress_probe_plaintext(
             auth_header = f"Proxy-Authorization: Basic {token}\r\n"
 
         request = (
-            f"GET {_FALLBACK_PROBE_URL} HTTP/1.1\r\n"
+            f"GET {_PROBE_URL} HTTP/1.1\r\n"
             f"Host: ip-api.com\r\n"
             f"{auth_header}"
-            "User-Agent: mithwire-mcp/proxy-probe\r\n"
+            "User-Agent: mithwire/proxy-probe\r\n"
             "Accept: application/json\r\n"
             "Proxy-Connection: Keep-Alive\r\n"
             "\r\n"
@@ -453,13 +306,13 @@ async def _http_egress_probe_plaintext(
                 if not chunk:
                     raise ProxyHealthError(
                         f"Proxy {proxy.redacted()} closed connection before "
-                        "sending response headers (raw-socket probe)."
+                        "sending response headers."
                     )
                 buf += chunk
 
             header_end = buf.index(b"\r\n\r\n")
             headers_raw = buf[:header_end].decode("ascii", errors="replace")
-            body_so_far = buf[header_end + 4 :]
+            body_so_far = buf[header_end + 4:]
 
             status_code = 0
             content_length = -1
@@ -493,17 +346,17 @@ async def _http_egress_probe_plaintext(
         )
     except asyncio.TimeoutError as exc:
         raise ProxyHealthError(
-            f"Proxy {proxy.redacted()} did not complete the raw-socket egress "
-            f"probe within {timeout:.1f}s."
+            f"Proxy {proxy.redacted()} did not complete the egress probe "
+            f"within {timeout:.1f}s."
         ) from exc
     except ProxyHealthError:
         raise
     except (ConnectionError, OSError) as exc:
         raise ProxyHealthError(
-            f"Proxy {proxy.redacted()} failed during raw-socket probe: {exc}"
+            f"Proxy {proxy.redacted()} failed during egress probe: {exc}"
         ) from exc
 
-    return _parse_egress_response(proxy, status, body, schema="ip-api")
+    return _parse_egress_response(proxy, status, body)
 
 
 def egress_summary(data: dict[str, Any] | None) -> dict[str, Any] | None:
