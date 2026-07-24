@@ -5,6 +5,13 @@ automatically by [release-please](https://github.com/googleapis/release-please);
 entries below are generated from [Conventional Commit](https://www.conventionalcommits.org/)
 messages. Do not edit released sections by hand.
 
+## [0.51.5](https://github.com/codeisalifestyle/mithwire/compare/v0.51.4...v0.51.5) (2026-07-24)
+
+
+### Refactors
+
+* simplify proxy probe to single raw-socket path ([#30](https://github.com/codeisalifestyle/mithwire/issues/30)) ([f9b0dd6](https://github.com/codeisalifestyle/mithwire/commit/f9b0dd6ae57f3a6eddc334e6da6e3c21741914de))
+
 ## [0.51.4](https://github.com/codeisalifestyle/mithwire/compare/v0.51.3...v0.51.4) (2026-07-24)
 
 
