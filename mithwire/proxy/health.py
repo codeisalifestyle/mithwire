@@ -24,6 +24,12 @@ Notes on the implementation:
   ``http`` endpoint 301-redirects to it), so we point at the ``http`` URL and
   let urllib follow the redirect through the proxy automatically — that
   exercises the proxy's CONNECT + TLS path the same way the real browser will.
+* **Fallback for residential/mobile proxies**: many residential gateways don't
+  support CONNECT well (slow or timing out). When the primary HTTPS probe
+  fails on timeout or connection error (NOT auth 407), the probe automatically
+  retries with a plain-HTTP target (``ip-api.com/json/``) that requires only
+  an absolute-form GET — no CONNECT tunnel needed. The response is normalized
+  to the ipapi.is schema so downstream identity alignment is unaffected.
 * The synchronous ``urlopen`` runs in a worker thread; the surrounding
   ``asyncio.wait_for`` enforces an async-side deadline regardless of any
   socket-level timer.
@@ -161,12 +167,38 @@ async def probe_proxy(
     :class:`ProxyHealthError` with a redacted, actionable message on any
     failure — bad host/port, refused TCP, HTTP 407 (wrong credentials), or an
     unparseable response. The browser never starts on failure.
+
+    For HTTP/HTTPS proxies the primary probe goes to ipapi.is (HTTPS via
+    CONNECT). If the CONNECT path times out or fails — common with
+    residential/mobile gateways — an automatic fallback probe hits a plain-HTTP
+    endpoint (ip-api.com) that only requires an absolute-form GET, no CONNECT.
+    Auth failures (407) are never retried via fallback.
     """
     timeout = max(1.0, float(timeout_seconds))
     if proxy.is_socks:
         await _check_tcp(proxy, timeout=timeout)
         return {}
-    return await _http_egress_probe(proxy, timeout=timeout)
+
+    try:
+        return await _http_egress_probe(proxy, timeout=timeout)
+    except ProxyHealthError as primary_exc:
+        if _is_auth_failure(primary_exc):
+            raise
+        logger.info(
+            "Primary probe (HTTPS/CONNECT) failed for %s: %s — "
+            "retrying with plain-HTTP fallback.",
+            proxy.redacted(),
+            primary_exc,
+        )
+        try:
+            return await _http_egress_probe_plaintext(proxy, timeout=timeout)
+        except ProxyHealthError:
+            raise primary_exc from None
+
+
+def _is_auth_failure(exc: ProxyHealthError) -> bool:
+    """True when the error clearly indicates bad credentials (407)."""
+    return "407" in str(exc)
 
 
 async def _check_tcp(proxy: ProxyConfig, *, timeout: float) -> None:
@@ -376,6 +408,102 @@ async def _http_egress_probe(proxy: ProxyConfig, *, timeout: float) -> dict[str,
         raise ProxyHealthError(
             f"Proxy {proxy.redacted()} failed mid-probe: {exc}"
         ) from exc
+
+
+async def _http_egress_probe_plaintext(
+    proxy: ProxyConfig, *, timeout: float
+) -> dict[str, Any]:
+    """Last-resort egress probe using raw sockets over plain HTTP.
+
+    When even urllib's ip-api.com fallback hangs (residential proxies that
+    keep connections alive regardless of ``Connection: close``), this probe
+    bypasses urllib entirely. It opens a raw TCP socket to the proxy, sends an
+    absolute-form ``GET`` with ``Proxy-Connection: Keep-Alive``, and reads
+    exactly ``Content-Length`` bytes — avoiding the EOF-wait hang.
+    """
+    import base64
+
+    def _fetch() -> tuple[int, bytes]:
+        auth_header = ""
+        if proxy.has_auth:
+            token = base64.b64encode(
+                f"{proxy.username}:{proxy.password}".encode()
+            ).decode("ascii")
+            auth_header = f"Proxy-Authorization: Basic {token}\r\n"
+
+        request = (
+            f"GET {_FALLBACK_PROBE_URL} HTTP/1.1\r\n"
+            f"Host: ip-api.com\r\n"
+            f"{auth_header}"
+            "User-Agent: mithwire-mcp/proxy-probe\r\n"
+            "Accept: application/json\r\n"
+            "Proxy-Connection: Keep-Alive\r\n"
+            "\r\n"
+        )
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        try:
+            sock.connect((proxy.host, proxy.port))
+            sock.sendall(request.encode("ascii"))
+
+            buf = b""
+            while b"\r\n\r\n" not in buf:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    raise ProxyHealthError(
+                        f"Proxy {proxy.redacted()} closed connection before "
+                        "sending response headers (raw-socket probe)."
+                    )
+                buf += chunk
+
+            header_end = buf.index(b"\r\n\r\n")
+            headers_raw = buf[:header_end].decode("ascii", errors="replace")
+            body_so_far = buf[header_end + 4 :]
+
+            status_code = 0
+            content_length = -1
+            for line in headers_raw.split("\r\n"):
+                if line.startswith("HTTP/"):
+                    status_code = int(line.split()[1])
+                if line.lower().startswith("content-length:"):
+                    content_length = int(line.split(":", 1)[1].strip())
+
+            if content_length >= 0:
+                while len(body_so_far) < content_length:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        break
+                    body_so_far += chunk
+            else:
+                while True:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        break
+                    body_so_far += chunk
+
+            return status_code, body_so_far
+        finally:
+            sock.close()
+
+    try:
+        status, body = await asyncio.wait_for(
+            asyncio.to_thread(_fetch),
+            timeout=timeout + 5.0,
+        )
+    except asyncio.TimeoutError as exc:
+        raise ProxyHealthError(
+            f"Proxy {proxy.redacted()} did not complete the raw-socket egress "
+            f"probe within {timeout:.1f}s."
+        ) from exc
+    except ProxyHealthError:
+        raise
+    except (ConnectionError, OSError) as exc:
+        raise ProxyHealthError(
+            f"Proxy {proxy.redacted()} failed during raw-socket probe: {exc}"
+        ) from exc
+
+    return _parse_egress_response(proxy, status, body, schema="ip-api")
 
 
 def egress_summary(data: dict[str, Any] | None) -> dict[str, Any] | None:
