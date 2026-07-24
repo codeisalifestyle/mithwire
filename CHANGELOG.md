@@ -5,6 +5,14 @@ automatically by [release-please](https://github.com/googleapis/release-please);
 entries below are generated from [Conventional Commit](https://www.conventionalcommits.org/)
 messages. Do not edit released sections by hand.
 
+## [0.51.4](https://github.com/codeisalifestyle/mithwire/compare/v0.51.3...v0.51.4) (2026-07-24)
+
+
+### Bug Fixes
+
+* add plain-HTTP fallback probe for residential/mobile proxies ([#28](https://github.com/codeisalifestyle/mithwire/issues/28)) ([9b09990](https://github.com/codeisalifestyle/mithwire/commit/9b099906c9050c80b3bb50f383969bce21dbe334))
+* probe_proxy fallback for ipapi.is HTTP→HTTPS redirect ([#27](https://github.com/codeisalifestyle/mithwire/issues/27)) ([abe19ce](https://github.com/codeisalifestyle/mithwire/commit/abe19ce291d51936431e24d05411a54aa2297e0b)), closes [#26](https://github.com/codeisalifestyle/mithwire/issues/26)
+
 ## [0.51.3](https://github.com/codeisalifestyle/mithwire/compare/v0.51.2...v0.51.3) (2026-07-22)
 
 
