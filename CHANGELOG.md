@@ -5,6 +5,14 @@ automatically by [release-please](https://github.com/googleapis/release-please);
 entries below are generated from [Conventional Commit](https://www.conventionalcommits.org/)
 messages. Do not edit released sections by hand.
 
+## [0.51.6](https://github.com/codeisalifestyle/mithwire/compare/v0.51.5...v0.51.6) (2026-07-25)
+
+
+### Features
+
+* **deps:** include browserforge in core dependencies ([55d594d](https://github.com/codeisalifestyle/mithwire/commit/55d594d06ba8c10d7218d8a91c3a3e329056dfdd))
+* **deps:** include browserforge in core dependencies (ELE-72) ([bb7092f](https://github.com/codeisalifestyle/mithwire/commit/bb7092f76376e55b2382ace121af1dfc65aee6ea))
+
 ## [0.51.5](https://github.com/codeisalifestyle/mithwire/compare/v0.51.4...v0.51.5) (2026-07-24)
 
 
