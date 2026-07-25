@@ -201,15 +201,16 @@ def _normalize_ip_api_response(data: dict[str, Any]) -> dict[str, Any]:
          "timezone": "Europe/London",
          "latitude": 51.5, "longitude": -0.12}}
     """
+    loc = data.get("location") if isinstance(data.get("location"), dict) else {}
     return {
-        "ip": data.get("query") or data.get("ip", ""),
+        "ip": data.get("ip") or data.get("query", ""),
         "location": {
-            "country": data.get("country"),
-            "country_code": data.get("countryCode") or data.get("country_code"),
-            "city": data.get("city"),
-            "timezone": data.get("timezone"),
-            "latitude": data.get("lat") or data.get("latitude"),
-            "longitude": data.get("lon") or data.get("longitude"),
+            "country": loc.get("country") or data.get("country"),
+            "country_code": loc.get("country_code") or loc.get("countryCode") or data.get("countryCode") or data.get("country_code"),
+            "city": loc.get("city") or data.get("city"),
+            "timezone": loc.get("timezone") or data.get("timezone"),
+            "latitude": loc.get("latitude") or loc.get("lat") or data.get("lat") or data.get("latitude"),
+            "longitude": loc.get("longitude") or loc.get("lon") or data.get("lon") or data.get("longitude"),
         },
     }
 

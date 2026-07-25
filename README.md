@@ -140,14 +140,11 @@ Looking to integrate browser automation directly into AI models like Claude or C
 ## 🚀 Installation
 
 ```bash
-# Standard installation (CDP mode)
+# Standard installation (includes CDP mode & BrowserForge fingerprint generator)
 pip install mithwire
 
-# Stealth mode (includes CloakBrowser wrapper)
+# Stealth mode (includes C++ patched CloakBrowser wrapper)
 pip install "mithwire[stealth]"
-
-# Full stealth + fingerprint generation
-pip install "mithwire[stealth,fingerprints]"
 ```
 
 

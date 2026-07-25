@@ -5,7 +5,7 @@ browser populations, ensuring that screen resolutions, hardware specs, and
 UA strings appear together at plausible frequencies.  This module wraps
 BrowserForge and maps its output to Mithwire's :class:`FingerprintConfig`.
 
-Install with: ``pip install mithwire[fingerprints]``
+BrowserForge is included by default with ``pip install mithwire``.
 """
 
 from __future__ import annotations
