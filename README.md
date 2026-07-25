@@ -1,21 +1,14 @@
-<p align="center">
-  <img src="assets/mithwire-banner.png" alt="mithwire" width="760">
-</p>
 
-<p align="center">
-  <b>🔥 An advanced, production-ready anti-detect browser framework for Python.</b><br>
-  Built with stealth at its core • Zero WebDriver footprint • Dual-engine architecture<br>
-  <b>No WebDriver • No Selenium • No ChromeDriver • No detectable JS shims</b>
-</p>
 
-<p align="center">
-  <a href="https://pypi.org/project/mithwire/"><img src="https://img.shields.io/pypi/v/mithwire?style=for-the-badge&color=d62839&label=pip%20install%20mithwire" alt="PyPI"></a>
-  <a href="https://pypi.org/project/mithwire/"><img src="https://img.shields.io/pypi/pyversions/mithwire?style=for-the-badge&color=3776ab&logo=python&logoColor=white" alt="Python versions"></a>
-  <a href="LICENSE.txt"><img src="https://img.shields.io/badge/license-AGPL--3.0-2ea44f?style=for-the-badge" alt="License"></a>
-  <a href="https://github.com/codeisalifestyle/mithwire-mcp"><img src="https://img.shields.io/badge/🤖_agents-mithwire--mcp-d62839?style=for-the-badge" alt="mithwire-mcp"></a>
-</p>
+**🔥 An advanced, production-ready anti-detect browser framework for Python.**  
+Built with stealth at its core • CDP-Based • Dual-engine architecture  
+**No WebDriver / No ChromeDriver / No JS shims**
+
+
 
 ---
+
+
 
 ## 💡 What is Mithwire?
 
@@ -24,6 +17,8 @@
 Unlike traditional automation frameworks—such as **Playwright, Puppeteer, and Selenium**—which were built for software testing rather than stealth, Mithwire was architected from the ground up to operate completely undetected.
 
 ---
+
+
 
 ## 💥 The Problem with Traditional Automation
 
@@ -36,53 +31,67 @@ Standard browser automation frameworks leak obvious signatures that modern secur
 
 ---
 
+
+
 ## 🛡️ The Mithwire Solution: Verified Stealth Superiority
 
 Mithwire solves these challenges by eliminating automation drivers and monkey-patching altogether:
 
 1. ⚡ **Direct CDP Control (Zero Driver):** Connects directly to Chromium via raw Chrome DevTools Protocol. There is no WebDriver binary, no `navigator.webdriver` flag, and no injected driver artifacts.
-2. 🎯 **Engine-Level Overrides:** Applies fingerprint overrides (timezone, locale, languages, platform, user agent client hints) inside Chromium via CDP `Emulation.*` domains. Overrides propagate natively to Web Workers and HTTP headers—ensuring 100% internal consistency.
+2. 🎯 **Engine-Level Overrides:** Applies fingerprint overrides (timezone, locale, languages, platform, user agent client hints) inside Chromium via CDP `Emulation.`* domains. Overrides propagate natively to Web Workers and HTTP headers—ensuring 100% internal consistency.
 3. 🥷 **Dual Stealth Architecture:** Flexible choice between ultra-fast CDP automation and C++ source-level patched binaries (CloakBrowser) for deep hardware anti-detection.
 4. 🔬 **Extensively Tested & Verified:** Rigorously benchmarked against CreepJS, deviceandbrowserinfo.com (DAB), Sannysoft, and real-world protected sites, achieving clean stealth scores across platforms.
 
 ---
+
+
 
 ## ⚡ Two Core Engines
 
 Mithwire provides two execution modes depending on your fingerprinting requirements:
 
 ### 1. 🚀 CDP Mode (`nodriver` - Default)
+
 - **Mechanism:** Launches standard Chromium-based browsers (Chrome, Brave, Edge) and controls them over raw CDP without a WebDriver.
 - **Stealth Strategy:** Uses native CDP `Emulation` commands to set timezone, locale, geolocation, screen dimensions, user agent, client hints, and hardware concurrency directly inside Chromium.
-- **Capabilities & Limits:** Extremely reliable, lightweight, and fast. Fully capable of running on **remote Linux servers/VPS** or local workstations when using **same-OS profiles** (e.g. Linux UA on a Linux server) or targeting sites that do not inspect deep physical C++ primitives.
-- **Cross-OS Note:** CDP mode can apply cross-OS user agents and platforms, but deeper analytics that inspect C++ level hardware primitives (e.g. SwiftShader GPU strings, native system fonts, AudioContext rendering curves) will still reflect the underlying host hardware.
+- **Capabilities & Limitations:** Extremely reliable, lightweight, and fast. CDP mode can apply cross-OS user agents and platforms, but deeper analytics that inspect C++ level hardware primitives (e.g. SwiftShader GPU strings, native system fonts, AudioContext rendering curves) will still reflect the underlying host hardware.
+- **When to use:** Default mode. Serves well for use cases where profiles can match host or cross-OS profiles where target sites have low/medium protection.
+
+
 
 ### 2. 🥷 Stealth Mode (Patched Binary / CloakBrowser)
+
 - **Mechanism:** Swaps in a custom C++-patched Chromium binary ([CloakBrowser](https://github.com/CloakHQ/CloakBrowser)).
 - **Stealth Strategy:** Modifies deep physical fingerprint surfaces (Canvas hash, WebGL vendor/renderer, AudioContext, system fonts, GPU strings, screen dimensions, TLS/JA3 fingerprints) directly at the C++ source code level before JavaScript executes.
 - **When to Use:** Ideal for **cross-OS profiles** (e.g. presenting an authentic Windows or macOS profile from a Linux VPS) and bypassing advanced anti-bot detectors (CreepJS, DAB) that inspect low-level hardware primitives.
 
 ---
 
+
+
 ## 📊 Mode Comparison Matrix
 
-| Feature / Capability | 🚀 CDP Mode (`engine="cdp"`) | 🥷 Stealth Mode (`engine="stealth"`) |
-| :--- | :--- | :--- |
-| **Chromium Binary** | Stock Chrome / Chromium / Edge / Brave | Patched CloakBrowser Binary |
-| **Automation Driver** | None (Raw CDP) | None (Raw CDP) |
-| **`navigator.webdriver`** | `false` (Native) | `false` (Native) |
-| **Timezone, Locale & Languages** | CDP Overrides (Natively in Workers) | CDP Overrides (Natively in Workers) |
-| **Geolocation Spoofing** | CDP Overrides + Permission Grant | CDP Overrides + Permission Grant |
-| **User Agent & Client Hints** | CDP `Emulation` Overrides | C++ Source Level |
-| **Same-OS Profiling (Linux on Linux, Mac on Mac)** | ✅ Excellent | ✅ Excellent |
-| **Cross-OS Profiling (Windows/Mac profile on Linux)** | ⚠️ Works for basic/medium sites; hardware strings reflect host | ✅ Perfect (C++ patched GPU, fonts, UA, canvas) |
-| **Canvas & Audio Fingerprinting** | Host Native | C++ Seed-Randomized |
-| **WebGL Vendor & Renderer** | JS / Profile Override | C++ Seed-Randomized |
-| **Font Enumeration & TLS Signature** | Host Native | C++ Source Level Patched |
-| **Supported Operating Systems** | Linux, macOS, Windows | Linux, macOS |
-| **Remote Linux / VPS Deployment** | ✅ Fully Supported (Same-OS or standard target sites) | ✅ Fully Supported (Advanced cross-OS target sites) |
+
+| Feature / Capability                                  | 🚀 CDP Mode (`engine="cdp"`)                                   | 🥷 Stealth Mode (`engine="stealth"`)               |
+| ----------------------------------------------------- | -------------------------------------------------------------- | -------------------------------------------------- |
+| **Chromium Binary**                                   | Stock Chrome / Chromium / Edge / Brave                         | Patched CloakBrowser Binary                        |
+| **Automation Driver**                                 | None (Raw CDP)                                                 | None (Raw CDP)                                     |
+| `navigator.webdriver`                                 | `false` (Native)                                               | `false` (Native)                                   |
+| **Timezone, Locale & Languages**                      | CDP Overrides (Natively in Workers)                            | CDP Overrides (Natively in Workers)                |
+| **Geolocation Spoofing**                              | CDP Overrides + Permission Grant                               | CDP Overrides + Permission Grant                   |
+| **User Agent & Client Hints**                         | CDP `Emulation` Overrides                                      | C++ Source Level                                   |
+| **Same-OS Profiling (Linux on Linux, Mac on Mac)**    | ✅ Excellent                                                    | ✅ Excellent                                        |
+| **Cross-OS Profiling (Windows/Mac profile on Linux)** | ⚠️ Works for basic/medium sites; hardware strings reflect host | ✅ Perfect (C++ patched GPU, fonts, UA, canvas)     |
+| **Canvas & Audio Fingerprinting**                     | Host Native                                                    | C++ Seed-Randomized                                |
+| **WebGL Vendor & Renderer**                           | JS / Profile Override                                          | C++ Seed-Randomized                                |
+| **Font Enumeration & TLS Signature**                  | Host Native                                                    | C++ Source Level Patched                           |
+| **Supported Operating Systems**                       | Linux, macOS, Windows                                          | Linux, macOS                                       |
+| **Remote Linux / VPS Deployment**                     | ✅ Fully Supported (Same-OS or standard target sites)           | ✅ Fully Supported (Advanced cross-OS target sites) |
+
 
 ---
+
+
 
 ## ✨ Key Features at a Glance
 
@@ -98,6 +107,8 @@ Mithwire provides two execution modes depending on your fingerprinting requireme
 
 ---
 
+
+
 ## 🎯 Primary Use Cases
 
 - 🤖 **AI Agent Web Operations & Debugging:** Power autonomous web browsing, automation development, and debugging for AI agents (via [mithwire-mcp](https://github.com/codeisalifestyle/mithwire-mcp)).
@@ -107,23 +118,24 @@ Mithwire provides two execution modes depending on your fingerprinting requireme
 
 ---
 
-## 🤖 Give Your AI Agents a Browser Fleet: Mithwire MCP
 
-<p align="center">
-  <a href="https://github.com/codeisalifestyle/mithwire-mcp">
-    <img src="assets/mithwire-mcp-banner.jpg" alt="mithwire-mcp" width="640">
-  </a>
-</p>
+
+## 🤖 Give Your AI Agents a Stealth Browser: Mithwire MCP
+
+
 
 Looking to integrate browser automation directly into AI models like Claude or Cursor?
 
-[**mithwire-mcp**](https://github.com/codeisalifestyle/mithwire-mcp) is a Model Context Protocol server built on Mithwire:
+**[mithwire-mcp](https://github.com/codeisalifestyle/mithwire-mcp)** is a Model Context Protocol server built on Mithwire:
+
 - 🛠️ **Develop & Debug Automations:** Hand over browser tasks to AI agents to build, test, and debug scripts autonomously with interactive DOM snapshots, console monitoring, and live noVNC viewing.
 - 🎮 **MCP Tools:** `session_start`, `browser_navigate`, `browser_click`, `browser_type`, `browser_snapshot`, `browser_solve_cloudflare`.
 - 👤 **Persistent Profiles & Proxy Registry:** Reusable identities with bound proxies and durable cookies.
 - 🐳 **Docker-Ready:** Pre-packaged with Xvfb, CloakBrowser, and noVNC for visual debugging.
 
 ---
+
+
 
 ## 🚀 Installation
 
@@ -138,11 +150,16 @@ pip install "mithwire[stealth]"
 pip install "mithwire[stealth,fingerprints]"
 ```
 
+
+
 ### Requirements
+
 - Python `>=3.10`
 - A Chromium-based browser (Chrome, Brave, Edge, or CloakBrowser)
 
 ---
+
+
 
 ## 🎬 Quick Start
 
@@ -164,7 +181,11 @@ uc.loop().run_until_complete(main())
 
 ---
 
+
+
 ## 🔧 Detailed Usage & Configuration
+
+
 
 ### 1. Launching with Custom Options
 
@@ -193,6 +214,8 @@ config = Config(
 browser = await start(config=config)
 ```
 
+
+
 ### 2. Fingerprinting & Identity Spoofing
 
 ```python
@@ -212,6 +235,8 @@ config = Config(fingerprint=fingerprint)
 browser = await start(config=config)
 ```
 
+
+
 ### 3. Finding and Interacting with Elements
 
 ```python
@@ -228,6 +253,8 @@ submit_btn = await tab.xpath("//button[@type='submit']", timeout=5.0)
 await submit_btn.click()
 ```
 
+
+
 ### 4. Solving Cloudflare Turnstile
 
 ```python
@@ -236,16 +263,20 @@ page = await browser.get("https://site-behind-turnstile.com")
 # Solves Turnstile challenge with automatic retry and coordinate clicking
 await page.verify_cf(max_retries=3, timeout=20)
 ```
-*(Requires `pip install opencv-python`)*
+
+*(Requires* `pip install opencv-python`*)*
 
 ---
+
+
 
 ## 📜 License & Acknowledgments
 
 Mithwire is distributed under the **GNU AGPL-3.0** license.
 
-Mithwire is a maintained, enhanced fork of [**nodriver**](https://github.com/UltrafunkAmsterdam/nodriver) by UltrafunkAmsterdam (the successor to `undetected-chromedriver`). Original copyright and license are preserved in `LICENSE.txt`.
+Mithwire is a maintained, enhanced fork of **[nodriver](https://github.com/UltrafunkAmsterdam/nodriver)** by UltrafunkAmsterdam (the successor to `undetected-chromedriver`). Original copyright and license are preserved in `LICENSE.txt`.
 
 Stealth mode uses [CloakBrowser](https://github.com/CloakHQ/CloakBrowser) for binary-level Chromium patching.
 
 > **Disclaimer:** Mithwire is intended for authorized security research, testing, and web scraping. Please automate responsibly and respect website Terms of Service.
+
