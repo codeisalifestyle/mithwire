@@ -40,10 +40,6 @@ permissions:
 
 concurrency:
   group: release-${{ github.ref }}
-  # cancel-in-progress must be true: the pypi environment has an approval
-  # gate, and an unapproved run blocks the concurrency group indefinitely
-  # (cancel requests can't dismiss pending environment approvals). With
-  # true, a newer push-to-main supersedes the stale run automatically.
   cancel-in-progress: true
 
 jobs:
