@@ -1,10 +1,19 @@
+<p align="center">
+  <img src="assets/mithwire-banner.png" alt="mithwire" width="760">
+</p>
 
+<p align="center">
+  <b>🔥 An advanced, production-ready anti-detect browser framework for Python.</b><br>
+  Built with stealth at its core • CDP-Based • Dual-engine architecture<br>
+  <b>No WebDriver / No ChromeDriver / No JS shims</b>
+</p>
 
-**🔥 An advanced, production-ready anti-detect browser framework for Python.**  
-Built with stealth at its core • CDP-Based • Dual-engine architecture  
-**No WebDriver / No ChromeDriver / No JS shims**
-
-
+<p align="center">
+  <a href="https://pypi.org/project/mithwire/"><img src="https://img.shields.io/pypi/v/mithwire?style=for-the-badge&color=d62839&label=pip%20install%20mithwire" alt="PyPI"></a>
+  <a href="https://pypi.org/project/mithwire/"><img src="https://img.shields.io/pypi/pyversions/mithwire?style=for-the-badge&color=3776ab&logo=python&logoColor=white" alt="Python versions"></a>
+  <a href="LICENSE.txt"><img src="https://img.shields.io/badge/license-AGPL--3.0-2ea44f?style=for-the-badge" alt="License"></a>
+  <a href="https://github.com/codeisalifestyle/mithwire-mcp"><img src="https://img.shields.io/badge/🤖_agents-mithwire--mcp-d62839?style=for-the-badge" alt="mithwire-mcp"></a>
+</p>
 
 ---
 
