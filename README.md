@@ -59,7 +59,7 @@ Mithwire solves these challenges by eliminating automation drivers and monkey-pa
 
 Mithwire provides two execution modes depending on your fingerprinting requirements:
 
-### 1. 🚀 CDP Mode (`nodriver` - Default)
+### 1. 🚀 CDP Mode (Default)
 
 - **Mechanism:** Launches standard Chromium-based browsers (Chrome, Brave, Edge) and controls them over raw CDP without a WebDriver.
 - **Stealth Strategy:** Uses native CDP `Emulation` commands to set timezone, locale, geolocation, screen dimensions, user agent, client hints, and hardware concurrency directly inside Chromium.
@@ -131,7 +131,9 @@ Mithwire provides two execution modes depending on your fingerprinting requireme
 
 ## 🤖 Give Your AI Agents a Stealth Browser: Mithwire MCP
 
-
+<p align="center">
+  <img src="assets/mithwire-mcp-banner.jpg" alt="mithwire-mcp" width="660">
+</p>
 
 Looking to integrate browser automation directly into AI models like Claude or Cursor?
 
@@ -254,9 +256,10 @@ await button.click()
 email_input = await tab.select("input[name='email']")
 await email_input.send_keys("user@example.com")
 
-# Select element by XPath
-submit_btn = await tab.xpath("//button[@type='submit']", timeout=5.0)
-await submit_btn.click()
+# Select elements by XPath (returns a list)
+submit_btns = await tab.xpath("//button[@type='submit']", timeout=5.0)
+if submit_btns:
+    await submit_btns[0].click()
 ```
 
 
@@ -267,7 +270,7 @@ await submit_btn.click()
 page = await browser.get("https://site-behind-turnstile.com")
 
 # Solves Turnstile challenge with automatic retry and coordinate clicking
-await page.verify_cf(max_retries=3, timeout=20)
+await page.verify_cf(max_retries=5, timeout=15)
 ```
 
 *(Requires* `pip install opencv-python`*)*
