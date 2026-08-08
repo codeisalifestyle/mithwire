@@ -60,6 +60,7 @@ class Browser(Connection):
     _process_pid: int
     _http: HTTPApi = None
     _cookies: CookieJar = None
+    _stop_timeout: float = 5.0
 
     config: Config
 
@@ -641,59 +642,107 @@ class Browser(Connection):
                 else:
                     del self._i
 
-    def stop(self):
+    async def astop(self) -> None:
+        """Gracefully stop the browser, closing the CDP websocket and subprocess pipes.
+
+        This is the preferred shutdown path in async contexts. It ensures no
+        file descriptors are leaked by:
+        1. Closing the CDP websocket via Connection.aclose()
+        2. Terminating the browser process (with kill fallback on timeout)
+        3. Closing subprocess pipes (stdin/stdout/stderr)
+        4. Awaiting process exit to reap the zombie
+        """
+        # 1. Close the CDP websocket connection
         try:
-            # asyncio.get_running_loop().create_task(self.send(cdp.browser.close()))
+            await self.aclose()
+        except Exception:
+            logger.debug("aclose raised during astop", exc_info=True)
 
-            asyncio.get_event_loop().create_task(self.aclose())
-            logger.debug("closed the connection using get_event_loop().create_task()")
-        except RuntimeError:
-            if self.connection:
-                try:
-                    # asyncio.run(self.send(cdp.browser.close()))
-                    asyncio.run(self.aclose())
-                    logger.debug("closed the connection using asyncio.run()")
-                except Exception:
-                    pass
-
-        for _ in range(3):
+        # 2. Terminate (or kill) the browser process
+        if self._process is not None and self._process.returncode is None:
             try:
                 self._process.terminate()
                 logger.info(
-                    "terminated browser with pid %d successfully" % self._process.pid
+                    "terminated browser with pid %d" % self._process.pid
                 )
-                break
-            except (Exception,):
+            except (ProcessLookupError, OSError):
+                logger.debug("process already gone during terminate")
+
+            # 3. Wait for exit with timeout; kill if stuck
+            try:
+                await asyncio.wait_for(self._process.wait(), timeout=self._stop_timeout)
+            except asyncio.TimeoutError:
                 try:
                     self._process.kill()
                     logger.info(
-                        "killed browser with pid %d successfully" % self._process.pid
+                        "killed browser with pid %d after timeout" % self._process.pid
                     )
-                    break
-                except (Exception,):
-                    try:
-                        if hasattr(self, "browser_process_pid"):
-                            os.kill(self._process_pid, 15)
-                            logger.info(
-                                "killed browser with pid %d using signal 15 successfully"
-                                % self._process.pid
-                            )
-                            break
-                    except (TypeError,):
-                        logger.info("typerror", exc_info=True)
-                        pass
-                    except (PermissionError,):
-                        logger.info(
-                            "browser already stopped, or no permission to kill. skip"
-                        )
-                        pass
-                    except (ProcessLookupError,):
-                        logger.info("process lookup failure")
-                        pass
-                    except (Exception,):
-                        raise
-            self._process = None
-            self._process_pid = None
+                    await self._process.wait()
+                except (ProcessLookupError, OSError):
+                    pass
+
+        # 4. Close subprocess pipes to release FDs
+        self._close_pipes()
+
+        self._process = None
+        self._process_pid = None
+
+    def _close_pipes(self) -> None:
+        """Close stdin/stdout/stderr pipes on the subprocess if open."""
+        if self._process is None:
+            return
+        for attr in ("stdin", "stdout", "stderr"):
+            pipe = getattr(self._process, attr, None)
+            if pipe is not None:
+                try:
+                    pipe.close()
+                except OSError:
+                    pass
+
+    def stop(self) -> None:
+        """Stop the browser (sync API, backward-compatible).
+
+        Prefers to delegate to astop() via the running event loop. Falls back
+        to best-effort sync cleanup when no loop is available.
+        """
+        # Try to run the full async shutdown if a loop is running
+        try:
+            loop = asyncio.get_running_loop()
+            future = asyncio.ensure_future(self.astop(), loop=loop)
+            # If we're not inside a coroutine already awaiting, we can't block,
+            # but at least the task is scheduled on the loop.
+            logger.debug("scheduled astop() on running loop")
+            # Give the task a chance to run if we're in a sync context that
+            # will return to the loop (e.g. atexit handler during shutdown).
+            return
+        except RuntimeError:
+            pass
+
+        # No running loop — try asyncio.run() for a full clean shutdown
+        try:
+            asyncio.run(self.astop())
+            logger.debug("closed the connection using asyncio.run()")
+            return
+        except RuntimeError:
+            logger.debug("asyncio.run() failed, falling back to sync cleanup")
+
+        # Last resort: best-effort sync cleanup
+        self._close_pipes()
+        if self._process is not None and self._process.returncode is None:
+            try:
+                self._process.terminate()
+                logger.info(
+                    "terminated browser with pid %d (sync fallback)"
+                    % self._process.pid
+                )
+            except (ProcessLookupError, OSError):
+                pass
+            try:
+                self._process.kill()
+            except (ProcessLookupError, OSError):
+                pass
+        self._process = None
+        self._process_pid = None
 
     def __await__(self):
         # return ( asyncio.sleep(0)).__await__()
