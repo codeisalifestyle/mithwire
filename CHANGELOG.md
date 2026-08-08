@@ -5,6 +5,13 @@ automatically by [release-please](https://github.com/googleapis/release-please);
 entries below are generated from [Conventional Commit](https://www.conventionalcommits.org/)
 messages. Do not edit released sections by hand.
 
+## [0.51.7](https://github.com/codeisalifestyle/mithwire/compare/v0.51.6...v0.51.7) (2026-08-08)
+
+
+### Bug Fixes
+
+* properly close CDP websocket and subprocess pipes in Browser.stop() ([#36](https://github.com/codeisalifestyle/mithwire/issues/36)) ([a4e671f](https://github.com/codeisalifestyle/mithwire/commit/a4e671ffde950c3295b781a1e1a6ed809fc9bddb))
+
 ## [0.51.6](https://github.com/codeisalifestyle/mithwire/compare/v0.51.5...v0.51.6) (2026-07-25)
 
 
