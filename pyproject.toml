@@ -69,7 +69,7 @@ build-backend = "setuptools.build_meta"
 
 [project.optional-dependencies]
 fingerprints = ["browserforge>=1.2"]
-stealth = ["cloakbrowser"]
+stealth = ["cloakbrowser>=0.5.10"]
 dev = [
     "black",
     "build",

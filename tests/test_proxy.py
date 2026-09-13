@@ -118,7 +118,7 @@ class CloakBrowserAdapterTest(unittest.TestCase):
     def test_platform_check(self) -> None:
         import sys
         from mithwire.stealth.cloakbrowser import is_platform_supported
-        if sys.platform in ("darwin", "linux"):
+        if sys.platform in ("darwin", "linux", "win32"):
             self.assertTrue(is_platform_supported())
 
     def test_fingerprint_to_flags(self) -> None:
@@ -130,6 +130,63 @@ class CloakBrowserAdapterTest(unittest.TestCase):
         self.assertIn("--fingerprint=", flag_str)
         self.assertIn("--fingerprint-timezone=Europe/London", flag_str)
         self.assertIn("--lang=en-GB", flag_str)
+        self.assertIn("--fingerprint-portable-cookies", flag_str)
+
+    def test_fingerprint_to_flags_with_proxy(self) -> None:
+        from mithwire.stealth import FingerprintConfig
+        from mithwire.stealth.cloakbrowser import fingerprint_to_flags
+        from mithwire.proxy import parse_proxy
+        fp = FingerprintConfig(timezone_id="Europe/London")
+        proxy = parse_proxy("http://1.2.3.4:8080")
+        flags = fingerprint_to_flags(fp, proxy=proxy)
+        self.assertIn("--fingerprint-transparent-proxy", flags)
+        self.assertIn("--fingerprint-webrtc-ip=auto", flags)
+
+    def test_fingerprint_to_flags_custom_webrtc_ip(self) -> None:
+        from mithwire.stealth import FingerprintConfig
+        from mithwire.stealth.cloakbrowser import fingerprint_to_flags
+        from mithwire.proxy import parse_proxy
+        fp = FingerprintConfig()
+        proxy = parse_proxy("http://1.2.3.4:8080")
+        flags = fingerprint_to_flags(fp, proxy=proxy, webrtc_ip="1.2.3.4")
+        self.assertIn("--fingerprint-webrtc-ip=1.2.3.4", flags)
+
+    def test_fingerprint_to_flags_portable_cookies_toggle(self) -> None:
+        from mithwire.stealth import FingerprintConfig
+        from mithwire.stealth.cloakbrowser import fingerprint_to_flags
+        fp = FingerprintConfig()
+        flags_off = fingerprint_to_flags(fp, portable_cookies=False)
+        self.assertNotIn("--fingerprint-portable-cookies", flags_off)
+
+    def test_fingerprint_windows_font_metrics_on_linux(self) -> None:
+        from unittest import mock
+        from mithwire.stealth import FingerprintConfig
+        from mithwire.stealth.cloakbrowser import fingerprint_to_flags
+        fp = FingerprintConfig(platform="Win32")
+        with mock.patch("sys.platform", "linux"):
+            flags = fingerprint_to_flags(fp)
+            self.assertIn("--fingerprint-windows-font-metrics", flags)
+            self.assertIn("--fingerprint-platform=windows", flags)
+
+    def test_cookie_from_json_resilience(self) -> None:
+        from mithwire.cdp.network import Cookie, CookiePriority, CookieSourceScheme
+        # Simulate missing CDP fields from newer Chromium versions
+        raw_cookie = {
+            "name": "cf_clearance",
+            "value": "secret_token",
+            "domain": ".example.com",
+            "path": "/",
+            "size": 42,
+            "httpOnly": True,
+            "secure": True,
+            "session": False,
+        }
+        cookie = Cookie.from_json(raw_cookie)
+        self.assertEqual(cookie.name, "cf_clearance")
+        self.assertEqual(cookie.value, "secret_token")
+        self.assertEqual(cookie.priority, CookiePriority.MEDIUM)
+        self.assertEqual(cookie.source_scheme, CookieSourceScheme.UNSET)
+        self.assertEqual(cookie.source_port, -1)
 
     def test_profile_seed_deterministic(self) -> None:
         from mithwire.stealth.cloakbrowser import _profile_seed

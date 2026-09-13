@@ -110,6 +110,63 @@ class ComputeLaunchArgsTests(unittest.TestCase):
             "--force-webrtc-ip-handling-policy=disable_non_proxied_udp", args
         )
 
+    def test_detect_chrome_major_from_macos_plist(self) -> None:
+        from mithwire.stealth import _detect_chrome_major
+        import plistlib
+
+        plist_bytes = plistlib.dumps({"CFBundleShortVersionString": "151.0.7922.108"})
+        with mock.patch("sys.platform", "darwin"), \
+             mock.patch("pathlib.Path.is_file", return_value=True), \
+             mock.patch("pathlib.Path.read_bytes", return_value=plist_bytes):
+            major = _detect_chrome_major("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+            self.assertEqual(major, "151")
+
+    def test_detect_chrome_major_from_windows_dir(self) -> None:
+        from mithwire.stealth import _detect_chrome_major
+        from pathlib import Path
+
+        dummy_dir = mock.MagicMock(spec=Path)
+        dummy_dir.is_dir.return_value = True
+        dummy_dir.name = "150.0.7871.114"
+
+        parent_mock = mock.MagicMock(spec=Path)
+        parent_mock.is_dir.return_value = True
+        parent_mock.iterdir.return_value = [dummy_dir]
+
+        with mock.patch("sys.platform", "win32"), \
+             mock.patch("pathlib.Path.parent", new_callable=mock.PropertyMock(return_value=parent_mock)):
+            major = _detect_chrome_major("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe")
+            self.assertEqual(major, "150")
+
+    def test_detect_chrome_major_from_version_flag_posix(self) -> None:
+        from mithwire.stealth import _detect_chrome_major
+
+        completed = mock.MagicMock()
+        completed.stdout = "Google Chrome 148.0.7778.215\n"
+
+        with mock.patch("sys.platform", "linux"), \
+             mock.patch("subprocess.run", return_value=completed) as mock_run:
+            major = _detect_chrome_major("/usr/bin/google-chrome")
+            self.assertEqual(major, "148")
+            # Verify --version was passed, NOT --product-version
+            mock_run.assert_called_once_with(
+                ["/usr/bin/google-chrome", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+
+    def test_detect_chrome_major_ignores_session_redirect(self) -> None:
+        from mithwire.stealth import _detect_chrome_major
+
+        completed = mock.MagicMock()
+        completed.stdout = "Opening in existing browser session.\n"
+
+        with mock.patch("sys.platform", "linux"), \
+             mock.patch("subprocess.run", return_value=completed):
+            major = _detect_chrome_major("/usr/bin/google-chrome")
+            self.assertIsNone(major)
+
 
 if __name__ == "__main__":
     unittest.main()

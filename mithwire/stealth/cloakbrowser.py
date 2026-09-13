@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import platform
 import random
 import sys
@@ -35,6 +36,12 @@ _LEGACY_PLATFORM_TO_CB: dict[str, str] = {
     "Win64": "windows",
     "Linux x86_64": "linux",
     "Linux armv81": "linux",
+    "macos": "macos",
+    "mac": "macos",
+    "darwin": "macos",
+    "windows": "windows",
+    "win": "windows",
+    "linux": "linux",
 }
 
 
@@ -44,7 +51,11 @@ class CloakBrowserUnavailable(RuntimeError):
 
 def is_platform_supported() -> bool:
     """Return True if the current OS supports the CloakBrowser binary."""
-    return sys.platform.startswith("linux") or sys.platform == "darwin"
+    return (
+        sys.platform.startswith("linux")
+        or sys.platform == "darwin"
+        or sys.platform == "win32"
+    )
 
 
 def require_platform() -> None:
@@ -52,7 +63,7 @@ def require_platform() -> None:
     if not is_platform_supported():
         os_name = platform.system()
         raise ValueError(
-            f"engine='stealth' requires Linux or macOS (current: {os_name}). "
+            f"engine='stealth' requires Linux, macOS, or Windows (current: {os_name}). "
             "Use engine='cdp' (default) on this platform, which applies "
             "Mithwire's CDP/JS stealth patches."
         )
@@ -64,6 +75,9 @@ def resolve_binary(*, license_key: str | None = None) -> str:
     Delegates to the ``cloakbrowser`` package which handles platform detection,
     download, checksum verification, and caching (~/.cloakbrowser/).
     """
+    if license_key is None:
+        license_key = os.environ.get("CLOAKBROWSER_LICENSE_KEY")
+
     try:
         from cloakbrowser import ensure_binary  # type: ignore[import-untyped]
     except ImportError as exc:
@@ -113,10 +127,14 @@ def _profile_seed(profile_name: str) -> int:
 def fingerprint_to_flags(
     fp: FingerprintConfig,
     *,
+    proxy: ProxyConfig | None = None,
     profile_name: str | None = None,
     headless: bool = True,
+    portable_cookies: bool = True,
+    transparent_proxy: bool = True,
+    webrtc_ip: str | None = "auto",
 ) -> list[str]:
-    """Translate a FingerprintConfig into CloakBrowser CLI flags.
+    """Translate a FingerprintConfig and proxy settings into CloakBrowser CLI flags.
 
     CloakBrowser generates a complete fingerprint from ``--fingerprint=<seed>``
     at the C++ level. Individual properties (canvas, WebGL, audio, fonts, GPU,
@@ -127,8 +145,8 @@ def fingerprint_to_flags(
     ``--no-sandbox`` is added only on Linux: CloakBrowser's custom Chromium
     build does not ship the SUID sandbox helper (``chrome-sandbox``) that
     stock Chromium packages install, so namespace sandboxing always fails on
-    Linux regardless of user.  On macOS the App Sandbox mechanism works
-    without a helper binary, so the flag is omitted to avoid the detectable
+    Linux regardless of user. On macOS and Windows the native sandbox mechanism
+    works without a helper binary, so the flag is omitted to avoid the detectable
     "unsupported command-line flag" infobar.
     """
     flags: list[str] = []
@@ -155,7 +173,13 @@ def fingerprint_to_flags(
         cb_platform = _LEGACY_PLATFORM_TO_CB.get(fp.platform, host_cb)
         flags.append(f"--fingerprint-platform={cb_platform}")
     else:
+        cb_platform = host_cb
         flags.append(f"--fingerprint-platform={host_cb}")
+
+    # When spoofing Windows on Linux, align font metrics to avoid detection by
+    # CreepJS and FingerprintJS font enumeration checks.
+    if sys.platform.startswith("linux") and cb_platform == "windows":
+        flags.append("--fingerprint-windows-font-metrics")
 
     if fp.timezone_id:
         flags.append(f"--fingerprint-timezone={fp.timezone_id}")
@@ -167,6 +191,18 @@ def fingerprint_to_flags(
     elif fp.primary_language:
         flags.append(f"--lang={fp.primary_language}")
         flags.append(f"--fingerprint-locale={fp.primary_language}")
+
+    # CloakBrowser 151+: Encrypt cookies with machine-independent key so
+    # profiles can be copied across machines/containers without losing logins.
+    if portable_cookies:
+        flags.append("--fingerprint-portable-cookies")
+
+    # CloakBrowser 151+: Advanced proxy connection and WebRTC IP leak protection
+    if proxy is not None:
+        if transparent_proxy:
+            flags.append("--fingerprint-transparent-proxy")
+        if webrtc_ip:
+            flags.append(f"--fingerprint-webrtc-ip={webrtc_ip}")
 
     if not headless:
         flags.append("--ignore-gpu-blocklist")
@@ -181,6 +217,9 @@ def build_launch_config(
     profile_name: str | None = None,
     headless: bool = True,
     license_key: str | None = None,
+    portable_cookies: bool = True,
+    transparent_proxy: bool = True,
+    webrtc_ip: str | None = "auto",
     extra_args: list[str] | None = None,
 ) -> tuple[str, list[str]]:
     """Return ``(binary_path, args_list)`` ready for MithwireBrowser.
@@ -191,8 +230,37 @@ def build_launch_config(
     require_platform()
     binary_path = resolve_binary(license_key=license_key)
 
+    # Detect proxy presence from either proxy object or extra_args
+    has_proxy_arg = bool(extra_args and any(arg.startswith("--proxy-server=") for arg in extra_args))
+    effective_proxy = proxy
+    if effective_proxy is None and has_proxy_arg:
+        # Proxy is set via CLI flags
+        effective_proxy = True  # type: ignore[assignment]
+
     args: list[str] = []
-    args.extend(fingerprint_to_flags(fp, profile_name=profile_name, headless=headless))
+    translated = fingerprint_to_flags(
+        fp,
+        proxy=proxy,
+        profile_name=profile_name,
+        headless=headless,
+        portable_cookies=portable_cookies,
+        transparent_proxy=transparent_proxy,
+        webrtc_ip=webrtc_ip,
+    )
+
+    # If proxy was only in extra_args, ensure transparent-proxy and webrtc-ip are applied
+    if proxy is None and has_proxy_arg:
+        if transparent_proxy and "--fingerprint-transparent-proxy" not in translated:
+            translated.append("--fingerprint-transparent-proxy")
+        if webrtc_ip and not any(a.startswith("--fingerprint-webrtc-ip=") for a in translated):
+            translated.append(f"--fingerprint-webrtc-ip={webrtc_ip}")
+
+    # Combine flags avoiding duplicate switches
+    for flag in translated:
+        prefix = flag.split("=")[0] if "=" in flag else flag
+        if extra_args and any(arg == flag or (arg.startswith(prefix + "=") and "=" in flag) for arg in extra_args):
+            continue
+        args.append(flag)
 
     if extra_args:
         args.extend(extra_args)
