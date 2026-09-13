@@ -5,6 +5,13 @@ automatically by [release-please](https://github.com/googleapis/release-please);
 entries below are generated from [Conventional Commit](https://www.conventionalcommits.org/)
 messages. Do not edit released sections by hand.
 
+## [0.51.8](https://github.com/codeisalifestyle/mithwire/compare/v0.51.7...v0.51.8) (2026-09-13)
+
+
+### Bug Fixes
+
+* prevent headful window on headless launch and upgrade cloakbrowser integration ([#38](https://github.com/codeisalifestyle/mithwire/issues/38)) ([5d3683f](https://github.com/codeisalifestyle/mithwire/commit/5d3683ff6cf9371edb7caa169877bafeab8047d4))
+
 ## [0.51.7](https://github.com/codeisalifestyle/mithwire/compare/v0.51.6...v0.51.7) (2026-08-08)
 
 
