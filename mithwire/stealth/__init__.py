@@ -17,6 +17,9 @@ Public surface:
 from __future__ import annotations
 
 import logging
+from pathlib import Path
+import plistlib
+import re
 import subprocess
 import sys
 
@@ -49,17 +52,59 @@ _PLATFORM_UA_TOKENS: dict[str, str] = {
 
 
 def _detect_chrome_major(executable_path: str) -> str | None:
-    """Run the browser binary with --product-version and return the major."""
+    """Detect the browser binary's major version without spawning a browser window."""
+    if not executable_path:
+        return None
+
+    exe = Path(executable_path)
+
+    # 1. macOS: Read Info.plist from .app bundle if available.
+    # This avoids spawning any subprocess or attaching to an existing Chrome GUI session.
+    if sys.platform == "darwin":
+        plist_candidates = [
+            exe.parent.parent / "Info.plist",
+            exe.parent / "Info.plist",
+        ]
+        for plist_path in plist_candidates:
+            if plist_path.is_file():
+                try:
+                    data = plistlib.loads(plist_path.read_bytes())
+                    ver = data.get("CFBundleShortVersionString") or data.get("KSVersion")
+                    if ver:
+                        m = re.search(r"\b(\d+)(?:\.\d+)*", str(ver))
+                        if m:
+                            return m.group(1)
+                except Exception:
+                    pass
+
+    # 2. Windows: Check version subdirectories in Chrome's application folder
+    # e.g. C:\Program Files\Google\Chrome\Application\<version>\
+    if sys.platform == "win32":
+        try:
+            parent = exe.parent
+            if parent.is_dir():
+                for item in parent.iterdir():
+                    if item.is_dir():
+                        m = re.match(r"^(\d+)\.\d+\.\d+\.\d+$", item.name)
+                        if m:
+                            return m.group(1)
+        except Exception:
+            pass
+
+    # 3. Subprocess fallback for Linux / other POSIX:
+    # Use '--version' (standard POSIX switch for Chromium).
+    # NEVER use '--product-version' on macOS/Windows as it can open an existing session.
     try:
         result = subprocess.run(
-            [executable_path, "--product-version"],
+            [str(exe), "--version"],
             capture_output=True,
             text=True,
             timeout=5,
         )
-        version = result.stdout.strip()
-        if version:
-            return version.split(".")[0]
+        output = (result.stdout or "").strip()
+        m = re.search(r"\b(\d+)\.\d+\.\d+", output)
+        if m:
+            return m.group(1)
     except Exception:
         pass
     return None
