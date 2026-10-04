@@ -8,6 +8,7 @@ ephemeral ``uc_*`` profile.
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import select
 import subprocess
@@ -20,6 +21,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from mithwire.core import _exit_guard
+
+try:
+    import resource
+except ImportError:  # pragma: no cover - not available on Windows
+    resource = None  # type: ignore[assignment]
 
 POSIX = os.name == "posix"
 
@@ -197,6 +203,38 @@ class ExitGuardTest(unittest.TestCase):
         ready, _, _ = select.select([read_end], [], [], 5)
 
         self.assertTrue(ready, "the sidecar inherited the owner's pipe and kept it open")
+
+    @unittest.skipUnless(resource is not None, "needs the resource module")
+    def test_a_busy_owner_with_a_high_lifeline_descriptor_is_still_guarded(self) -> None:
+        """``select.select`` rejects descriptors >= 1024; a host with that many
+        open files/sockets used to crash the sidecar at startup, silently."""
+        wanted = 1200
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        if hard != resource.RLIM_INFINITY and hard < wanted + 100:
+            self.skipTest("hard file-descriptor limit too low for this test")
+        if soft != resource.RLIM_INFINITY and soft < wanted + 100:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (wanted + 100, hard))
+            self.addCleanup(resource.setrlimit, resource.RLIMIT_NOFILE, (soft, hard))
+        devnull = os.open(os.devnull, os.O_RDONLY)
+        filler = [os.dup(devnull) for _ in range(wanted)]  # next free fd is now > 1024
+
+        def close_filler() -> None:
+            for fd in (devnull, *filler):
+                with contextlib.suppress(OSError):
+                    os.close(fd)
+
+        self.addCleanup(close_filler)
+        browser = self._browser()
+        guard = self._arm(browser)
+        self.assertGreaterEqual(guard._lifeline, 1024, "test setup: descriptor not high enough")
+
+        time.sleep(1.0)  # a sidecar that crashed on startup would be gone by now
+        self.assertIsNone(guard._process.poll(), "the sidecar died at startup")
+        self.assertIsNone(browser.poll(), "...and the browser is untouched while the owner lives")
+
+        guard.release()  # the owner "dies"
+        self.assertEqual(guard._process.wait(timeout=10), 0)
+        self.assertTrue(_wait_until(lambda: browser.poll() is not None), "browser must be reaped")
 
     def test_disabled_by_environment(self) -> None:
         with patch.dict(os.environ, {_exit_guard.DISABLE_ENV: "1"}):

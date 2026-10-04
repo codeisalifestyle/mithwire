@@ -484,12 +484,10 @@ class Browser(Connection):
         cleanup = asyncio.ensure_future(self._finish_abort())
         _background_tasks.add(cleanup)
         cleanup.add_done_callback(_background_tasks.discard)
-        try:
-            await asyncio.shield(cleanup)
-        except asyncio.CancelledError:
-            # Cancelled again while tidying up: the cleanup task carries on
-            # without us, and the caller re-raises the original exception.
-            pass
+        # If the caller is cancelled (again) while waiting, that cancellation
+        # propagates -- it is never ours to swallow -- and the cleanup task
+        # carries on without us.
+        await asyncio.shield(cleanup)
 
     def _abort_now(self) -> None:
         """The synchronous, uninterruptible half of aborting a launch."""

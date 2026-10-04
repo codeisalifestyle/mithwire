@@ -30,7 +30,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
-import select
+import selectors
 import shutil
 import signal
 import subprocess
@@ -241,9 +241,14 @@ def run(
             with contextlib.suppress(OSError, ValueError):
                 signal.signal(sig, signal.SIG_IGN)
 
+    # ``selectors`` rather than ``select.select``: the lifeline is whatever
+    # descriptor number the owner had free, and select() refuses anything at or
+    # above FD_SETSIZE (1024) -- a busy host would have crashed the sidecar at
+    # startup and silently lost the protection.
+    selector = selectors.DefaultSelector()
+    selector.register(lifeline, selectors.EVENT_READ)
     while True:
-        ready, _, _ = select.select([lifeline], [], [], poll)
-        if ready:
+        if selector.select(poll):
             try:
                 data = os.read(lifeline, 4096)
             except OSError:
@@ -253,6 +258,7 @@ def run(
             continue
         if not _alive(target):
             break  # the browser exited by itself
+    selector.close()
 
     _reap(target, needle, grace)
     _remove_profile(cleanup_dir)
