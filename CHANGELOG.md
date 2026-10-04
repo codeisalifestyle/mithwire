@@ -5,6 +5,13 @@ automatically by [release-please](https://github.com/googleapis/release-please);
 entries below are generated from [Conventional Commit](https://www.conventionalcommits.org/)
 messages. Do not edit released sections by hand.
 
+## [0.51.10](https://github.com/codeisalifestyle/mithwire/compare/v0.51.9...v0.51.10) (2026-10-04)
+
+
+### Bug Fixes
+
+* reap the exit-guard sidecar so released guards do not linger as zombies ([#42](https://github.com/codeisalifestyle/mithwire/issues/42)) ([a04140e](https://github.com/codeisalifestyle/mithwire/commit/a04140e8fb1f256d0b09d7930b53b161e562e4b7))
+
 ## [0.51.9](https://github.com/codeisalifestyle/mithwire/compare/v0.51.8...v0.51.9) (2026-10-04)
 
 
