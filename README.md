@@ -275,6 +275,16 @@ await page.verify_cf(max_retries=5, timeout=15)
 
 *(Requires* `pip install opencv-python`*)*
 
+### 5. Browser Process Lifecycle
+
+Mithwire owns the Chrome process it launches and makes sure it does not outlive you:
+
+- `await browser.stop()` terminates Chrome, closes its pipes and deletes the temporary profile (`uc_*`) it created. A profile you pass via `user_data_dir` is never touched.
+- A launch that fails or is cancelled midway (timeout, `Ctrl-C`, a cancelled request) terminates the process it already spawned instead of orphaning it.
+- On POSIX a tiny watchdog process keeps watching the host: if the host is killed hard (`SIGKILL`, OOM, crash), it terminates *that* browser, and only that browser, and removes its temporary profile. It never signals a process whose command line does not match the launched profile.
+
+Set `MITHWIRE_NO_EXIT_GUARD=1` to disable the watchdog (for example if you deliberately want Chrome to keep running after your script is killed).
+
 ---
 
 

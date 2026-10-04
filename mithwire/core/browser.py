@@ -8,25 +8,38 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import contextlib
 import http.cookiejar
 import json
 import logging
 import os
 import pathlib
 import pickle
+import shutil
 import urllib.parse
 import urllib.request
 import warnings
 from collections import defaultdict
-from typing import List, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 from .. import cdp
-from . import tab, util
+from . import _exit_guard, tab, util
 from ._contradict import ContraDict
 from .config import Config, PathLike, is_posix
 from .connection import Connection
 
 logger = logging.getLogger(__name__)
+
+# Strong references to fire-and-forget cleanup tasks so they cannot be
+# garbage-collected (and silently dropped) before they finish.
+_background_tasks: set = set()
+
+
+def _kill_if_running(process: asyncio.subprocess.Process) -> None:
+    """SIGKILL ``process`` unless it already exited. Safe to call from a loop callback."""
+    if process.returncode is None:
+        with contextlib.suppress(ProcessLookupError, OSError):
+            process.kill()
 
 
 class Browser(Connection):
@@ -61,6 +74,14 @@ class Browser(Connection):
     _http: HTTPApi = None
     _cookies: CookieJar = None
     _stop_timeout: float = 5.0
+    #: How long ``start()`` keeps retrying to reach the DevTools endpoint.
+    _connect_timeout: float = 10.0
+    #: After a failed/cancelled launch: SIGTERM first, SIGKILL after this long.
+    _abort_kill_after: float = 3.0
+    #: Sidecar that kills the browser if this process dies uncleanly.
+    _guard: Optional[_exit_guard.ExitGuard] = None
+    #: True while this instance owns an ephemeral profile directory it created.
+    _owns_temp_profile: bool = False
 
     config: Config
 
@@ -365,9 +386,40 @@ class Browser(Connection):
                 )
             )
             self._process_pid = self._process.pid
+            self._owns_temp_profile = not self.config.uses_custom_data_dir
+            # Armed before the first await after the spawn, so from here on the
+            # browser cannot outlive this process however it ends (SIGKILL, a
+            # crash, a wedged shutdown that is finally force-exited, ...).
+            # Best-effort; a no-op where unsupported. See ``_exit_guard``.
+            self._guard = _exit_guard.arm(
+                self._process_pid,
+                "--user-data-dir=%s" % self.config.user_data_dir,
+                None
+                if self.config.uses_custom_data_dir
+                else str(self.config.user_data_dir),
+            )
 
         self._http = HTTPApi((self.config.host, self.config.port))
         util.get_registered_instances().add(self)
+        try:
+            await self._connect()
+        except GeneratorExit:
+            # The coroutine is being closed (e.g. a pending task collected at
+            # loop shutdown): nothing may be awaited any more, so only do the
+            # synchronous half. The exit guard finishes the job.
+            self._abort_now()
+            raise
+        except BaseException:
+            # Failure *and* cancellation (e.g. an MCP client timing out and
+            # cancelling the request) both land here. The browser is already
+            # running and nobody else holds a reference to this half-started
+            # instance, so unless it is torn down now it leaks: a live Chrome
+            # (often showing an empty window) that nothing can ever stop.
+            await self._abort_launch()
+            raise
+
+    async def _connect(self) -> None:
+        """Connect to the freshly-spawned browser and apply the stealth baseline."""
         # Connect to the freshly-spawned Chrome's DevTools endpoint. The old
         # loop budgeted only ~2.75s (5 attempts x 0.5s), which is tight: a
         # cold Chrome typically binds its DevTools port in ~1-2s, leaving
@@ -381,7 +433,7 @@ class Browser(Connection):
         # against a wall-clock deadline of ~10s. Warm starts converge in a
         # few probes; cold/contended starts get a real chance to finish;
         # genuinely broken launches still fail in bounded time.
-        deadline = asyncio.get_running_loop().time() + 10.0
+        deadline = asyncio.get_running_loop().time() + self._connect_timeout
         delay = 0.05
         last_exc: BaseException | None = None
         while True:
@@ -414,6 +466,82 @@ class Browser(Connection):
         await self.update_targets()
         await self._apply_stealth()
         # await self
+
+    async def _abort_launch(self) -> None:
+        """Tear down a browser whose launch failed or was cancelled.
+
+        Called from an ``except BaseException`` handler, so it has to work while
+        the surrounding task is being cancelled. Cancellation can interrupt any
+        ``await`` -- and frameworks with level-triggered cancellation (anyio, as
+        used by the MCP SDK) re-deliver it at *every* checkpoint -- so the part
+        that actually stops the browser is synchronous and cannot be
+        interrupted. Only the tidy-up (closing the CDP socket, reaping the
+        process, deleting the profile) is asynchronous, and it runs in a task of
+        its own.
+        """
+        self._abort_now()
+
+        cleanup = asyncio.ensure_future(self._finish_abort())
+        _background_tasks.add(cleanup)
+        cleanup.add_done_callback(_background_tasks.discard)
+        # If the caller is cancelled (again) while waiting, that cancellation
+        # propagates -- it is never ours to swallow -- and the cleanup task
+        # carries on without us.
+        await asyncio.shield(cleanup)
+
+    def _abort_now(self) -> None:
+        """The synchronous, uninterruptible half of aborting a launch."""
+        proc = self._process
+        if proc is not None and proc.returncode is None:
+            with contextlib.suppress(ProcessLookupError, OSError):
+                proc.terminate()
+            # Escalate from a loop callback: it fires even when every task
+            # involved has been cancelled.
+            with contextlib.suppress(RuntimeError):
+                asyncio.get_running_loop().call_later(
+                    self._abort_kill_after, _kill_if_running, proc
+                )
+        # Also hand the job to the sidecar, which does not depend on this loop
+        # (SIGTERM, then SIGKILL after a grace period, then the profile).
+        self._release_guard()
+
+    async def _finish_abort(self) -> None:
+        try:
+            await self.astop()
+        except Exception:
+            logger.debug("astop raised while aborting a launch", exc_info=True)
+        util.get_registered_instances().discard(self)
+
+    def _release_guard(self) -> None:
+        """Stand the exit guard down (stop the browser first, see ``_exit_guard``)."""
+        guard, self._guard = self._guard, None
+        if guard is not None:
+            guard.release()
+
+    async def _remove_temp_profile(self) -> None:
+        """Delete the ephemeral profile this instance created.
+
+        Never touches a user-supplied ``user_data_dir``. Anything that cannot be
+        removed now is retried by ``util.deconstruct_browser`` at interpreter
+        exit, and by the exit guard if this process dies first.
+        """
+        if not self._owns_temp_profile:
+            return
+        self._owns_temp_profile = False
+        path = getattr(getattr(self, "config", None), "user_data_dir", None)
+        if not path:
+            return
+        for _ in range(5):
+            try:
+                shutil.rmtree(path)
+            except FileNotFoundError:
+                return
+            except OSError:
+                await asyncio.sleep(0.2)  # helper processes may still be flushing
+            else:
+                logger.info("removed temp profile %s", path)
+                return
+        logger.debug("could not remove temp profile %s", path)
 
     async def _apply_stealth(self) -> None:
         """Apply the engine-owned anti-detect stealth to the live browser.
@@ -651,6 +779,9 @@ class Browser(Connection):
         2. Terminating the browser process (with kill fallback on timeout)
         3. Closing subprocess pipes (stdin/stdout/stderr)
         4. Awaiting process exit to reap the zombie
+        5. Deleting the ephemeral profile directory this instance created
+           (a user-supplied ``user_data_dir`` is never touched)
+        6. Unregistering the instance from the global exit-time registry
         """
         # 1. Close the CDP websocket connection
         try:
@@ -681,11 +812,28 @@ class Browser(Connection):
                 except (ProcessLookupError, OSError):
                     pass
 
-        # 4. Close subprocess pipes to release FDs
-        self._close_pipes()
+        # 4. Close subprocess pipes to release FDs. A failure here must never
+        #    skip the steps below.
+        try:
+            self._close_pipes()
+        except Exception:  # noqa: BLE001
+            logger.debug("closing the subprocess pipes failed", exc_info=True)
 
         self._process = None
         self._process_pid = None
+
+        # 5. The browser is gone: delete its ephemeral profile now instead of at
+        #    interpreter exit (a long-lived process would otherwise pile up
+        #    hundreds of MB per launch), then stand the exit guard down.
+        await self._remove_temp_profile()
+        self._release_guard()
+
+        # 6. Done: stop pinning this instance. A long-lived host (an MCP server
+        #    that launches hundreds of browsers) would otherwise keep every
+        #    closed Browser, and its connection state, alive forever. Only
+        #    reached when the steps above completed, so an interrupted stop
+        #    stays registered for the exit-time sweep to retry.
+        util.get_registered_instances().discard(self)
 
     def _close_pipes(self) -> None:
         """Close stdin/stdout/stderr pipes on the subprocess if open."""
@@ -693,11 +841,24 @@ class Browser(Connection):
             return
         for attr in ("stdin", "stdout", "stderr"):
             pipe = getattr(self._process, attr, None)
-            if pipe is not None:
+            # stdin is a StreamWriter (has close()); stdout/stderr are
+            # StreamReaders, which cannot be closed directly.
+            close = getattr(pipe, "close", None)
+            if close is not None:
                 try:
-                    pipe.close()
+                    close()
                 except OSError:
                     pass
+        # Release the read ends deterministically. Without this they only go
+        # away once *every* process holding the write end (Chrome's helper
+        # processes inherit it) has exited. Closing the transport of an
+        # already-exited process is safe and idempotent.
+        transport = getattr(self._process, "_transport", None)
+        if transport is not None and self._process.returncode is not None:
+            try:
+                transport.close()
+            except Exception:  # noqa: BLE001
+                logger.debug("closing the subprocess transport failed", exc_info=True)
 
     def stop(self) -> None:
         """Stop the browser (sync API, backward-compatible).
@@ -743,6 +904,7 @@ class Browser(Connection):
                 pass
         self._process = None
         self._process_pid = None
+        self._release_guard()
 
     def __await__(self):
         # return ( asyncio.sleep(0)).__await__()
