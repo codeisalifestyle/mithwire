@@ -35,6 +35,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 from typing import Optional
 
@@ -82,10 +83,37 @@ class ExitGuard:
         if lifeline is not None:
             with contextlib.suppress(OSError):
                 os.close(lifeline)
-        # Reap the sidecar if it has already exited (avoids a zombie); if it is
-        # still winding down, subprocess reaps it on the next Popen creation.
-        with contextlib.suppress(Exception):
-            self._process.poll()
+        self._reap_sidecar()
+
+    def _reap_sidecar(self) -> None:
+        """Collect the sidecar's exit status once it has finished.
+
+        The sidecar is this process's child, so until somebody waits for it a
+        finished sidecar stays in the process table as a zombie (``subprocess``
+        only tidies up when some unrelated process is launched next). Right
+        after the lifeline closes the sidecar is still busy -- it may be
+        stopping the browser -- so a plain ``poll()`` would find nothing to
+        collect. A short-lived daemon thread does the waiting instead; it never
+        keeps the interpreter alive and is skipped when the sidecar is already
+        gone.
+        """
+        process = self._process
+        try:
+            if process.poll() is not None:
+                return  # already exited, and collected by that poll
+            threading.Thread(
+                target=_wait_quietly,
+                args=(process,),
+                name="mithwire-exit-guard-reaper",
+                daemon=True,
+            ).start()
+        except Exception:  # noqa: BLE001 - e.g. interpreter shutdown: nothing left to tidy
+            logger.debug("exit guard: could not schedule reaping the sidecar", exc_info=True)
+
+
+def _wait_quietly(process: "subprocess.Popen[bytes]") -> None:
+    with contextlib.suppress(Exception):
+        process.wait()
 
 
 def _disabled() -> bool:

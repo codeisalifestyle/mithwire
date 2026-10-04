@@ -204,6 +204,31 @@ class ExitGuardTest(unittest.TestCase):
 
         self.assertTrue(ready, "the sidecar inherited the owner's pipe and kept it open")
 
+    def test_a_released_sidecar_does_not_linger_as_a_zombie(self) -> None:
+        """The sidecar is the owner's child. Unless somebody collects its exit
+        status it stays in the process table until some unrelated subprocess is
+        launched -- in a long-lived server, one per released guard."""
+        browser = self._browser()
+        guard = self._arm(browser)
+        pid = guard.pid
+
+        # Stand down with the browser still running, so the sidecar has real
+        # work to do and cannot already be gone by the time release() returns.
+        guard.release()
+        self.assertTrue(_wait_until(lambda: browser.poll() is not None), "browser must be reaped")
+
+        def in_process_table() -> bool:
+            try:
+                os.kill(pid, 0)  # succeeds for a zombie (unlike _alive) and never reaps it
+            except ProcessLookupError:
+                return False
+            return True
+
+        self.assertTrue(
+            _wait_until(lambda: not in_process_table(), timeout=10),
+            "the exited sidecar was never reaped: it is a zombie",
+        )
+
     @unittest.skipUnless(resource is not None, "needs the resource module")
     def test_a_busy_owner_with_a_high_lifeline_descriptor_is_still_guarded(self) -> None:
         """``select.select`` rejects descriptors >= 1024; a host with that many
