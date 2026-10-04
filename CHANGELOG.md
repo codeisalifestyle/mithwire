@@ -5,6 +5,13 @@ automatically by [release-please](https://github.com/googleapis/release-please);
 entries below are generated from [Conventional Commit](https://www.conventionalcommits.org/)
 messages. Do not edit released sections by hand.
 
+## [0.51.9](https://github.com/codeisalifestyle/mithwire/compare/v0.51.8...v0.51.9) (2026-10-04)
+
+
+### Bug Fixes
+
+* stop leaking Chrome processes and temp profiles on aborted launches and hard-killed owners ([#40](https://github.com/codeisalifestyle/mithwire/issues/40)) ([ff1adfd](https://github.com/codeisalifestyle/mithwire/commit/ff1adfd239d8250b9860b133c7c08445e5e83356))
+
 ## [0.51.8](https://github.com/codeisalifestyle/mithwire/compare/v0.51.7...v0.51.8) (2026-09-13)
 
 
