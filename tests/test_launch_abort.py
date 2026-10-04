@@ -284,6 +284,37 @@ class AstopProfileTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(proc.stdin.is_closing())
             self.assertFalse(profile.exists())
 
+    async def test_astop_unregisters_the_browser(self) -> None:
+        """A long-lived host must not pin every browser it ever closed."""
+        with tempfile.TemporaryDirectory() as tmp:
+            browser = self._bare_browser(Path(tmp) / "uc_reg", owns=True)
+            registry = util.get_registered_instances()
+            registry.add(browser)
+            self.addCleanup(registry.discard, browser)
+
+            await browser.astop()
+
+            self.assertNotIn(browser, registry)
+
+    def test_exit_sweep_survives_browsers_unregistering_themselves(self) -> None:
+        """``stop()`` unregisters the browser; the sweep iterates the registry."""
+        registry: set = set()
+
+        class FakeBrowser:  # hashable, unlike SimpleNamespace
+            stopped = False
+            config = SimpleNamespace(user_data_dir="/nonexistent", uses_custom_data_dir=True)
+
+            def stop(self) -> None:
+                registry.discard(self)
+
+        for _ in range(3):
+            registry.add(FakeBrowser())
+
+        with patch.object(util, "__registered__instances__", registry):
+            util.deconstruct_browser()  # used to raise "Set changed size during iteration"
+
+        self.assertEqual(registry, set())
+
     async def test_close_pipes_accepts_real_stream_readers(self) -> None:
         """``_close_pipes`` itself must cope with real StreamReader stdout/stderr."""
         browser = self._bare_browser(Path(tempfile.gettempdir()) / "unused", owns=False)

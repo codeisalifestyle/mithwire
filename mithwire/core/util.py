@@ -181,7 +181,8 @@ def deconstruct_browser(browser: Browser = None):
 
         return asyncio.get_running_loop().create_task(deconstruct(browser))
 
-    for _ in __registered__instances__:
+    # Iterate a snapshot: stopping a browser unregisters it.
+    for _ in list(__registered__instances__):
         if not _.stopped:
             _.stop()
         for attempt in range(5):

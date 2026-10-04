@@ -783,6 +783,7 @@ class Browser(Connection):
         4. Awaiting process exit to reap the zombie
         5. Deleting the ephemeral profile directory this instance created
            (a user-supplied ``user_data_dir`` is never touched)
+        6. Unregistering the instance from the global exit-time registry
         """
         # 1. Close the CDP websocket connection
         try:
@@ -828,6 +829,13 @@ class Browser(Connection):
         #    hundreds of MB per launch), then stand the exit guard down.
         await self._remove_temp_profile()
         self._release_guard()
+
+        # 6. Done: stop pinning this instance. A long-lived host (an MCP server
+        #    that launches hundreds of browsers) would otherwise keep every
+        #    closed Browser, and its connection state, alive forever. Only
+        #    reached when the steps above completed, so an interrupted stop
+        #    stays registered for the exit-time sweep to retry.
+        util.get_registered_instances().discard(self)
 
     def _close_pipes(self) -> None:
         """Close stdin/stdout/stderr pipes on the subprocess if open."""
